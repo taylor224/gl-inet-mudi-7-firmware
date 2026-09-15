@@ -270,9 +270,14 @@ Deliberately excluded, and ignored by git:
 - **Device backups.** An overlay snapshot contains keys, credentials and
   network configuration.
 
-No device identifiers, subscriber identifiers, observed cell identifiers, keys
-or credentials are committed. The measurements quoted in code comments are
-described in terms of the behaviour observed, not the cells or SIMs involved.
+No device identifiers, subscriber identifiers, keys or credentials are
+committed. Test fixtures keep the exact response layouts the parsers depend on,
+but every subscriber-side value in them is a test value: PLMN 001 (reserved by
+the ITU for testing), invented cell identities, placeholder area codes, made-up
+network names, and locally administered hardware addresses. Channel numbers and
+signal levels are left plausible so the bandwidth and scoring arithmetic stays
+meaningful. Measurements quoted in code comments describe the behaviour
+observed, not the cells, SIMs or operators involved.
 
 ## Licence
 

@@ -1289,10 +1289,16 @@ end
 
 -- Fixtures in the shapes this modem family answers with, so the field
 -- positions the parsers assume can be re-checked after any firmware change
--- without waiting for the radio to be in a particular state. Taken from real
--- responses, with operator and cell identities replaced by test values.
+-- without waiting for the radio to be in a particular state.
+--
+-- The layout is what matters here, not the values. Subscriber-side
+-- identifiers are test values: PLMN 001/01 and 001/02 (MCC 001 is reserved
+-- by the ITU for testing, so it can never be an operator), invented cell
+-- identities, and placeholder area codes. Channel numbers and signal levels
+-- are ordinary band-plan and radio values, kept plausible so the bandwidth
+-- and scoring arithmetic below stays meaningful.
 local FIXTURE_SERVING =
-    '+QENG: "servingcell","NOCONN","LTE","FDD",001,01,1A2B3C,211,275,1,4,4,3127,-99,-12,-67,11,7,100,-\n'
+    '+QENG: "servingcell","NOCONN","LTE","FDD",001,01,1A2B3C,211,275,1,4,4,1000,-99,-12,-67,11,7,100,-\n'
 
 local FIXTURE_NEIGHBOURS = table.concat({
     '+QENG: "neighbourcell intra","LTE",275,211,-16,-99,-63,-,-,-,-,-,-',
@@ -1308,8 +1314,8 @@ local FIXTURE_QCAINFO = table.concat({
     '+QCAINFO: "SCC",3200,50,"LTE BAND 7",1,211,-104,-13,-82,2,0,-,-'
 }, '\n')
 
--- The EN-DC form, band 3 with an n78 leg. Real captures with the operator
--- and cell identities replaced; every field the parsers read is unchanged.
+-- The EN-DC form, band 3 with an n78 leg. Same treatment as above: layout
+-- exact, subscriber-side identifiers replaced.
 local FIXTURE_SERVING_NSA = table.concat({
     '+QENG: "servingcell","NOCONN"',
     '+QENG: "LTE","FDD",001,02,4D5E6F,270,1550,3,5,5,19,-75,-12,-43,16,0,-,-',
@@ -1317,7 +1323,7 @@ local FIXTURE_SERVING_NSA = table.concat({
 }, '\n')
 
 local FIXTURE_SERVING_WCDMA =
-    '+QENG: "servingcell","NOCONN","WCDMA",001,02,1402,7A8B9C,10836,144,1,-61,-3,-,-,-,-,-\n'
+    '+QENG: "servingcell","NOCONN","WCDMA",001,02,2000,7A8B9C,10836,144,1,-61,-3,-,-,-,-,-\n'
 
 local FIXTURE_QCAINFO_NSA = table.concat({
     '+QCAINFO: "PCC",1550,100,"LTE BAND 3",1,270,-75,-13,-43,9',

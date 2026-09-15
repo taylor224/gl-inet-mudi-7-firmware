@@ -286,8 +286,11 @@ local function run()
 end
 
 -- Fixtures in the shapes iwinfo answers with, so what these parsers depend
--- on can be re-checked after a firmware change. Taken from real output, with
--- network names and hardware addresses replaced by test values.
+-- on can be re-checked after a firmware change.
+--
+-- The layout is what matters, not the values. Network names are invented and
+-- every hardware address is locally administered (the 02: prefix), so none of
+-- them can collide with a real vendor address or be looked up anywhere.
 local FIXTURE_IWINFO = table.concat({
     'wlan0     ESSID: "TestNet-2G"',
     '          Access Point: 02:00:00:00:00:01',

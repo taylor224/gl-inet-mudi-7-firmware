@@ -5,6 +5,12 @@
 Supports transfer-list versions 1-4. Only the commands that can appear in a
 full (non-incremental) package are honoured: `new` supplies data, `erase` and
 `zero` only extend the image, everything else is ignored.
+
+The transfer-list format is AOSP's, defined by
+build/tools/releasetools/blockimgdiff.py in the Android source. It is also what
+the widely used xpirt/sdat2img reads; this is an independent implementation
+written against the format rather than derived from that tool, so nothing here
+is under its GPL-3.0-only terms.
 """
 import sys
 
