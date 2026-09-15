@@ -1,0 +1,239 @@
+--- a/wireless.js
++++ b/wireless.js
+@@ -86,7 +86,7 @@
+   '0600': function (t, i, e) {
+     ((i = e('24fb')(!1)).push([
+       t.i,
+-      '.wireless-wrapper[data-v-64a06730]{padding:20px 0}.wireless-wrapper .wireless-title[data-v-64a06730]{display:flex;align-items:center}.wireless-wrapper .access-control-btn[data-v-64a06730]{font-size:14px;margin-left:16px;color:var(--text-weak);font-weight:400}.wireless-wrapper .access-control-btn .iconfont[data-v-64a06730]{font-size:14px;margin-left:6px}.wireless-wrapper .sub-access-control[data-v-64a06730]{margin:-14px 16px 14px}.wireless-wrapper .sub-access-control .access-control-btn[data-v-64a06730]{margin-left:0}.wireless-wrapper .wifi-sleep-tips[data-v-64a06730]{margin-bottom:10px}.wireless-wrapper .wireless-tab[data-v-64a06730]{margin-top:30px}.wireless-wrapper .wireless-tab.is-first-tab[data-v-64a06730]{margin-top:0}.wireless-wrapper .wifi-card-wrapper[data-v-64a06730]{margin-bottom:30px}.wireless-wrapper .wifi-card-wrapper.is-last-wifi[data-v-64a06730]{margin-bottom:0}.iot-network-wrapper[data-v-64a06730]{margin-bottom:30px}.iot-network-wrapper .iot-network-tips[data-v-64a06730]{margin-bottom:20px}.iot-network-wrapper .iot-network-tips .gl-btn[data-v-64a06730]{margin:0 0 0 15px}.iot-network-wrapper .iot-network-tips .icon-plus[data-v-64a06730]{margin-right:7px;font-size:12px}@media screen and (max-width:480px){.iot-network-tips[data-v-64a06730]{flex-direction:row}}',
++      '.wireless-wrapper[data-v-64a06730]{padding:20px 0}.wireless-wrapper .wireless-title[data-v-64a06730]{display:flex;align-items:center}.wireless-wrapper .access-control-btn[data-v-64a06730]{font-size:14px;margin-left:16px;color:var(--text-weak);font-weight:400}.wireless-wrapper .access-control-btn .iconfont[data-v-64a06730]{font-size:14px;margin-left:6px}.wireless-wrapper .sub-access-control[data-v-64a06730]{margin:-14px 16px 14px}.wireless-wrapper .sub-access-control .access-control-btn[data-v-64a06730]{margin-left:0}.wireless-wrapper .wifi-sleep-tips[data-v-64a06730]{margin-bottom:10px}.wireless-wrapper .wireless-tab[data-v-64a06730]{margin-top:30px}.wireless-wrapper .wireless-tab.is-first-tab[data-v-64a06730]{margin-top:0}.wireless-wrapper .wifi-card-wrapper[data-v-64a06730]{margin-bottom:30px}.wireless-wrapper .wifi-card-wrapper.is-last-wifi[data-v-64a06730]{margin-bottom:0}.iot-network-wrapper[data-v-64a06730]{margin-bottom:30px}.iot-network-wrapper .iot-network-tips[data-v-64a06730]{margin-bottom:20px}.iot-network-wrapper .iot-network-tips .gl-btn[data-v-64a06730]{margin:0 0 0 15px}.iot-network-wrapper .iot-network-tips .icon-plus[data-v-64a06730]{margin-right:7px;font-size:12px}@media screen and (max-width:480px){.iot-network-tips[data-v-64a06730]{flex-direction:row}}.min-rssi-card{margin-top:30px}.min-rssi-card .min-rssi-tips{margin-bottom:20px}.min-rssi-card .min-rssi-toggle{display:flex;align-items:center;justify-content:space-between;padding:12px 0;border-bottom:1px solid var(--divider)}.min-rssi-card .min-rssi-grid{display:flex;flex-wrap:wrap;gap:16px;padding:16px 0}.min-rssi-card .min-rssi-field{flex:1 1 150px;min-width:140px;display:flex;flex-direction:column;gap:6px}.min-rssi-card .min-rssi-field label{font-size:13px;color:var(--text-weak)}.min-rssi-card .min-rssi-control{display:flex;align-items:center;gap:8px}.min-rssi-card .min-rssi-control .unit{font-size:13px;color:var(--text-disabled);flex-shrink:0}.min-rssi-card .min-rssi-hint{margin:0 0 16px;font-size:12px;color:var(--text-disabled);line-height:1.5}.min-rssi-card .min-rssi-actions{display:flex;justify-content:flex-end;padding-bottom:8px}.min-rssi-card .min-rssi-section{border-top:1px solid var(--divider);padding-top:12px}.min-rssi-card .min-rssi-section h4{margin:0 0 8px;font-size:14px;color:var(--text-subtitle)}.min-rssi-card .min-rssi-empty{margin:0 0 12px;font-size:13px;color:var(--text-disabled)}.min-rssi-card .min-rssi-observing{margin:0 0 10px;font-size:12px;line-height:1.5;color:var(--text-disabled)}.min-rssi-card .min-rssi-list{list-style:none;margin:0 0 12px;padding:0}.min-rssi-card .min-rssi-list li{display:flex;align-items:center;gap:12px;padding:8px 10px;border-radius:5px;font-size:13px;color:var(--text-weak)}.min-rssi-card .min-rssi-list li:nth-child(odd){background-color:var(--background-subtitle)}.min-rssi-card .min-rssi-list li.is-weak .signal{color:var(--error);font-weight:700}.min-rssi-card .min-rssi-list li .mac{flex:0 0 150px;font-family:monospace}.min-rssi-card .min-rssi-list li .iface{flex:0 0 70px;color:var(--text-disabled)}.min-rssi-card .min-rssi-list li .signal{flex:0 0 80px}.min-rssi-card .min-rssi-list li .note{flex:1;text-align:right;color:var(--text-disabled)}@media screen and (max-width:600px){.min-rssi-card .min-rssi-list li{flex-wrap:wrap;gap:6px}.min-rssi-card .min-rssi-list li .mac{flex:1 1 100%}}',
+       ''
+     ]),
+       (t.exports = i));
+@@ -6281,9 +6281,216 @@
+           '1309f388',
+           null
+         )),
++      // Minimum-RSSI card.
++      //
++      // Front end for the gl_rssiguard daemon: it polls `iwinfo assoclist` for
++      // per-client signal and disconnects anyone who stays under the floor,
++      // with a short hostapd deny-list entry so they do not immediately come
++      // back to the same radio.
++      //
++      // Written as a plain options object with a render function rather than
++      // through the bundle's normalizeComponent helper, since it needs neither
++      // a scope id nor injected styles -- its CSS is appended unscoped.
++      MinRssiCard = {
++        name: 'min-rssi-card',
++        data: () => ({
++          ready: !1,
++          available: !1,
++          saving: !1,
++          timer: null,
++          config: {
++            enabled: !1,
++            min_rssi: -75,
++            interval: 10,
++            strikes: 3,
++            ban_time: 30,
++            grace: 30
++          },
++          status: { running: !1, clients: [], recent: [] }
++        }),
++        created() {
++          this.load();
++        },
++        beforeDestroy() {
++          this.timer && clearInterval(this.timer);
++        },
++        methods: {
++          rpc(method, params, quiet) {
++            return window.$rpcRequest('call', ['sid', 'rssiguard', method, params || {}], {
++              timeout: 2e4,
++              ignoreCoreErrTips: Boolean(quiet)
++            });
++          },
++          load() {
++            // Quiet: firmware without the daemon is expected to answer "method
++            // not found", and should do so without a toast.
++            this.rpc('get_config', {}, !0).then(
++              (t) => {
++                ((this.available = !0),
++                  (this.config = Object.assign({}, this.config, t)),
++                  (this.ready = !0),
++                  this.poll(),
++                  (this.timer = setInterval(this.poll, 5e3)));
++              },
++              () => {
++                ((this.available = !1), (this.ready = !0));
++              }
++            );
++          },
++          poll() {
++            this.rpc('get_status', {}, !0).then(
++              (t) => {
++                if (t) this.status = t;
++              },
++              () => {}
++            );
++          },
++          apply() {
++            if (this.saving) return;
++            this.saving = !0;
++            const c = this.config;
++            this.rpc('set_config', {
++              enabled: Boolean(c.enabled),
++              min_rssi: Number(c.min_rssi),
++              interval: Number(c.interval),
++              strikes: Number(c.strikes),
++              ban_time: Number(c.ban_time),
++              grace: Number(c.grace)
++            }).then(
++              () => {
++                ((this.saving = !1),
++                  this.$message.closeAll(),
++                  this.$message.success(this.$t('msg.success')),
++                  this.poll());
++              },
++              () => {
++                this.saving = !1;
++              }
++            );
++          },
++          clientNote(c) {
++            if (c.exempt) return this.$t('rssiguard.exempt_col');
++            if (c.banned) return this.$t('rssiguard.blocked_col');
++            if (c.settling) return this.$t('rssiguard.settling_col');
++            if (c.strikes > 0) {
++              return this.$t('rssiguard.strikes_col') + ' ' + c.strikes + '/' + this.config.strikes;
++            }
++            return '';
++          },
++          kickTime(at) {
++            const d = new Date((at || 0) * 1000);
++            const pad = (n) => (n < 10 ? '0' + n : String(n));
++            return pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
++          }
++        },
++        render(h) {
++          // Nothing at all on firmware that does not carry the daemon, rather
++          // than a card that cannot do anything.
++          if (!this.ready || !this.available) return h();
++
++          const c = this.config;
++          const weak = (client) => client.signal != null && client.signal < Number(c.min_rssi);
++
++          const field = (labelKey, key, unit) =>
++            h('div', { class: 'min-rssi-field' }, [
++              h('label', this.$t(labelKey)),
++              h('div', { class: 'min-rssi-control' }, [
++                h('el-input', {
++                  attrs: { value: String(c[key]) },
++                  on: {
++                    input: (v) => {
++                      this.$set(this.config, key, v);
++                    }
++                  }
++                }),
++                unit ? h('span', { class: 'unit' }, this.$t(unit)) : null
++              ])
++            ]);
++
++          const clients = this.status.clients || [];
++          const recent = this.status.recent || [];
++
++          return h('gl-card', { class: 'min-rssi-card', attrs: { title: this.$t('rssiguard.title') } }, [
++            h('gl-tips', {
++              class: 'min-rssi-tips',
++              attrs: { state: 'info', tips: this.$t('rssiguard.intro_tips') }
++            }),
++            h('div', { class: 'min-rssi-toggle' }, [
++              h('span', this.$t('rssiguard.enable_label')),
++              h('gl-switch', {
++                attrs: { size: 'small', value: Boolean(c.enabled) },
++                on: {
++                  change: (v) => {
++                    this.$set(this.config, 'enabled', v);
++                  }
++                }
++              })
++            ]),
++            h('div', { class: 'min-rssi-grid' }, [
++              field('rssiguard.threshold_label', 'min_rssi', 'rssiguard.dbm_unit'),
++              field('rssiguard.strikes_label', 'strikes', null),
++              field('rssiguard.ban_time_label', 'ban_time', 'rssiguard.seconds_unit'),
++              field('rssiguard.grace_label', 'grace', 'rssiguard.seconds_unit'),
++              field('rssiguard.interval_label', 'interval', 'rssiguard.seconds_unit')
++            ]),
++            h('p', { class: 'min-rssi-hint' }, this.$t('rssiguard.threshold_tips')),
++            h('div', { class: 'min-rssi-actions' }, [
++              h(
++                'gl-button',
++                { attrs: { type: 'primary', disabled: this.saving }, on: { click: this.apply } },
++                this.$t('core.apply')
++              )
++            ]),
++            h('div', { class: 'min-rssi-section' }, [
++              h('h4', this.$t('rssiguard.clients_title')),
++              // The list is populated whether or not the feature is on -- that
++              // is how a threshold gets chosen -- so say plainly which of the
++              // two states this is.
++              this.status.enforcing
++                ? null
++                : h('p', { class: 'min-rssi-observing' }, this.$t('rssiguard.observing_note')),
++              clients.length
++                ? h(
++                    'ul',
++                    { class: 'min-rssi-list' },
++                    clients.map((client) =>
++                      h('li', { key: client.mac, class: weak(client) ? 'is-weak' : '' }, [
++                        h('span', { class: 'mac' }, client.mac),
++                        h('span', { class: 'iface' }, client.iface),
++                        h(
++                          'span',
++                          { class: 'signal' },
++                          client.signal == null ? '-' : client.signal + ' dBm'
++                        ),
++                        h('span', { class: 'note' }, this.clientNote(client))
++                      ])
++                    )
++                  )
++                : h('p', { class: 'min-rssi-empty' }, this.$t('rssiguard.no_clients'))
++            ]),
++            h('div', { class: 'min-rssi-section' }, [
++              h('h4', this.$t('rssiguard.recent_title')),
++              recent.length
++                ? h(
++                    'ul',
++                    { class: 'min-rssi-list' },
++                    recent.map((kick, index) =>
++                      h('li', { key: kick.mac + index }, [
++                        h('span', { class: 'mac' }, kick.mac),
++                        h('span', { class: 'iface' }, kick.iface),
++                        h('span', { class: 'signal' }, kick.signal + ' dBm'),
++                        h('span', { class: 'note' }, this.kickTime(kick.at))
++                      ])
++                    )
++                  )
++                : h('p', { class: 'min-rssi-empty' }, this.$t('rssiguard.no_recent'))
++            ])
++          ]);
++        }
++      },
+       z = {
+         name: 'wireless',
+-        components: { UsageEnvironment: f, WifiCard: I.exports },
++        components: { UsageEnvironment: f, WifiCard: I.exports, MinRssiCard: MinRssiCard },
+         data: () => ({
+           wifiData: [],
+           wifiTimeId: null,
+@@ -6804,7 +7011,8 @@
+                 i('usage-environment', {
+                   ref: 'usageEnvironment',
+                   on: { apply: t.setEnvironmentConfig }
+-                })
++                }),
++                i('min-rssi-card')
+               ],
+               2
+             );

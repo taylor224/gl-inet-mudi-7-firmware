@@ -1,0 +1,75 @@
+config cellguard 'global'
+	# Master switch. Nothing is sent to the modem while this is 0, except
+	# releasing a lock the daemon itself left behind: a modem pinned to a
+	# cell nobody is watching is how it ends up parked on 3G.
+	option enabled '0'
+
+	# How often the serving and neighbour cells are read, in seconds.
+	# Both reads are local AT queries and do not trigger a network scan.
+	option interval '5'
+
+	# Minimum seconds between two lock changes. Locking makes the modem
+	# re-register, which drops the data connection for a few seconds, so
+	# this is what stops a 5 second poll from becoming a 5 second outage.
+	option dwell '120'
+
+	# A candidate must beat the serving cell by this many points before a
+	# voluntary switch happens. Escaping a blacklisted cell ignores it.
+	option min_gain '6'
+
+	# Escaping a blacklisted cell is rationed, because each attempt locks the
+	# modem and a lock makes it re-register -- measured on this device as a
+	# full backhaul teardown and rebuild, several seconds without data.
+	#
+	#   escape_dwell  seconds between attempts
+	#   max_attempts  attempts before giving up, releasing the lock and
+	#                 leaving the modem alone until the cell changes
+	#   verify_after  seconds to wait before deciding an attempt failed
+	#
+	# Worst case is max_attempts reconnections spread over
+	# max_attempts * escape_dwell seconds, then silence.
+	option escape_dwell '90'
+	option max_attempts '3'
+	option verify_after '30'
+
+	# Every lock issued counts against max_attempts, whether it lands or not,
+	# and the count decays after this many seconds instead of resetting each
+	# time the serving cell changes. So the worst case is max_attempts
+	# reconnections per escape_reset per blacklisted cell.
+	option escape_reset '1800'
+
+	# Neighbours below this RSRP (dBm) are never locked to. A lock onto a
+	# cell the modem cannot hold means no service, or 3G, until it is undone.
+	option min_rsrp '-105'
+
+	# A held lock is released once the cell it delivered falls below this
+	# RSRP (dBm). A pinned modem cannot hand over, so it has to be let go
+	# before the signal is gone -- once it is gone the modem drops to 3G.
+	option release_rsrp '-110'
+
+	# Score = rsrp + sinr_weight * sinr. Raise sinr_weight to favour clean
+	# cells over merely loud ones.
+	option sinr_weight '1.5'
+
+	# Prefer 5G candidates by this many points when both RATs are visible.
+	option nr_bonus '10'
+
+	# Points per MHz of channel width. Width is what separates a fast cell
+	# from a merely loud one, so at 0.5 a 100 MHz NR carrier is worth 50
+	# points against a 20 MHz LTE one's 10. Neighbour reports carry no
+	# width, so this only applies to cells the router has camped on before
+	# and recorded in /etc/gl_cellguard_bw.json.
+	option bw_weight '0.5'
+
+	# Leave the modem unlocked when every visible cell is blacklisted,
+	# rather than locking onto a blacklisted one. 0 keeps the current lock.
+	option unlock_when_no_candidate '1'
+
+# One section per excluded cell. Match on pci+earfcn (what neighbour scans
+# report) or on cid (only the serving cell reports a full cell ID).
+#
+# config block
+#	option pci '123'
+#	option earfcn '1850'
+#	option cid '0x1A2B3C4'
+#	option note 'flaky tower outside the office'

@@ -1,0 +1,28 @@
+{
+  "cellguard": {
+    "title": "Excluded Towers",
+    "open_label": "Excluded towers",
+    "exclude_label": "Exclude",
+    "excluded_label": "Excluded",
+    "exclude_current_label": "Exclude the tower in use",
+    "empty_tips": "No towers are excluded. The modem may use any tower it can reach.",
+    "intro_tips": "Excluded towers are never locked onto. When the modem lands on one, it moves to the strongest tower that is not excluded.",
+    "add_title": "Add manually",
+    "add_label": "Add",
+    "pci_placeholder": "PCI",
+    "earfcn_placeholder": "EARFCN / ARFCN",
+    "cid_placeholder": "Cell ID (optional)",
+    "note_placeholder": "Note (optional)",
+    "key_tips": "A PCI is enough. Add the frequency to exclude one carrier rather than every cell with that PCI.",
+    "remove_label": "Remove",
+    "unavailable_tips": "Tower exclusion is not installed on this firmware.",
+    "serving_label": "In use now",
+    "entry_label": "Exclude Tower",
+    "none_label": "None",
+    "count_label": "{count} excluded",
+    "observing_note": "The daemon is watching the cell in use but changing nothing. Build the list here, then enable exclusion in the cellular settings.",
+    "no_serving_tips": "The tower in use is not known yet. Wait a few seconds for the next reading and try again.",
+    "already_excluded": "That tower is already on the list.",
+    "other_sim_tips": "このSIMはデータ通信に使われていません。タワーの除外は使用中のSIMに従うため、そちらに切り替えてから除外してください。"
+  }
+}

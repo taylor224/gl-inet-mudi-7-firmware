@@ -1,0 +1,7 @@
+{
+  "session": {
+    "remember_label": "Remember this device",
+    "remember_tips": "Skip the password on this browser for 30 days. Anyone who can use this browser can then open the admin panel, so leave it off on shared computers. Signing out forgets the device again.",
+    "resuming": "Signing in…"
+  }
+}

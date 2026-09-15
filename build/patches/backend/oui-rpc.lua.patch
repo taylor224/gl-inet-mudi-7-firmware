@@ -1,0 +1,145 @@
+--- a/oui-rpc.lua
++++ b/oui-rpc.lua
+@@ -51,15 +51,132 @@
+     ngx.say(cjson.encode(resp))
+ end
+ 
++-- "Remember this device" cookie.
++--
++-- It is HttpOnly on purpose: the page never needs to read the token, only to
++-- send it, and keeping it out of JavaScript removes a whole class of theft.
++-- SameSite=Lax stops another site from silently resuming the session in a
++-- hidden request.
++local REMEMBER_COOKIE = "Remember-Token"
++
++local function remember_cookie(value, max_age)
++    return string.format("%s=%s; Max-Age=%d; Path=/; HttpOnly; SameSite=Lax",
++        REMEMBER_COOKIE, value, max_age)
++end
++
++-- The cookie name goes into a Lua pattern, where "-" is a quantifier, not a
++-- literal. Unescaped, "Remember-Token" can never match itself and every read
++-- silently returns nil -- which is exactly the bug that kept resume from ever
++-- seeing a token.
++local REMEMBER_PATTERN = REMEMBER_COOKIE:gsub("%-", "%%-") .. "=([%w%.]+)"
++
++local function read_remember_cookie()
++    local header = ngx.var.http_cookie
++    if not header then return nil end
++    return header:match(REMEMBER_PATTERN)
++end
++
+ local function rpc_method_logout(id, params)
+     ngx.log(ngx.NOTICE, "logout successful")
+ 
++    -- Logging out explicitly means this browser should stop being trusted;
++    -- leaving the token behind would let the next visitor walk back in.
++    local token = read_remember_cookie()
++    if token then
++        ubus.call("gl-session", "forget", { token = token })
++    end
++
+     ubus.call("gl-session", "logout", params)
+ 
++    ngx.header["Set-Cookie"] = remember_cookie("", 0)
++
+     local resp = rpc.result_response(id)
+     ngx.say(cjson.encode(resp))
+ end
+ 
++-- Issue a token for the browser that already holds this session.
++local function rpc_method_remember(id, params)
++    local res = ubus.call("gl-session", "remember", params)
++
++    if not res or res.code ~= 0 then
++        ngx.log(ngx.WARN, "remember failed: ",
++            res and tostring(res.code) or "no reply from gl-session")
++        local resp = rpc.error_response(id, res and res.code or rpc.ERROR_CODE_INTERNAL_ERROR)
++        ngx.say(cjson.encode(resp))
++        return
++    end
++
++    local ttl = res.data.expires - os.time()
++    if ttl < 0 then ttl = 0 end
++
++    ngx.header["Set-Cookie"] = remember_cookie(res.data.token, ttl)
++
++    ngx.log(ngx.NOTICE, "device remembered")
++
++    -- The token itself is deliberately not returned to the page.
++    local resp = rpc.result_response(id, { expires = res.data.expires })
++    ngx.say(cjson.encode(resp))
++end
++
++-- Trade the remembering cookie for a session, so a remembered browser lands on
++-- the dashboard instead of the login form.
++local function rpc_method_resume(id, params)
++    local token = read_remember_cookie()
++
++    if not token then
++        local resp = rpc.error_response(id, rpc.ERROR_CODE_ACCESS)
++        ngx.say(cjson.encode(resp))
++        return
++    end
++
++    local res = ubus.call("gl-session", "resume", { token = token })
++
++    if not res or res.code ~= 0 then
++        -- A token the device has explicitly rejected is worse than useless:
++        -- clear it so the browser stops retrying on every visit. But only on
++        -- that rejection -- no reply at all, or the login rate limiter, is
++        -- transient, and dropping the cookie for a hiccup permanently forgets
++        -- the browser.
++        if res and res.code == rpc.ERROR_CODE_ACCESS then
++            ngx.header["Set-Cookie"] = remember_cookie("", 0)
++        end
++        ngx.log(ngx.WARN, "resume failed: ",
++            res and tostring(res.code) or "no reply from gl-session")
++        local resp = rpc.error_response(id, res and res.code or rpc.ERROR_CODE_INTERNAL_ERROR,
++            res and res.data or nil)
++        ngx.say(cjson.encode(resp))
++        return
++    end
++
++    ngx.log(ngx.NOTICE, "session resumed from a remembered device")
++
++    ngx.header["Set-Cookie"] = "Admin-Token=" .. res.data.sid
++
++    local resp = rpc.result_response(id, res.data)
++    ngx.say(cjson.encode(resp))
++end
++
++-- Forget this browser, or every remembered browser.
++local function rpc_method_forget(id, params)
++    local args = { all = params and params.all or false }
++
++    if not args.all then
++        args.token = read_remember_cookie()
++        if not args.token then
++            local resp = rpc.result_response(id, { removed = 0 })
++            ngx.say(cjson.encode(resp))
++            return
++        end
++    end
++
++    local res = ubus.call("gl-session", "forget", args)
++
++    ngx.header["Set-Cookie"] = remember_cookie("", 0)
++
++    local resp = rpc.result_response(id, res and res.data or { removed = 0 })
++    ngx.say(cjson.encode(resp))
++end
++
+ local function rpc_method_alive(id, params)
+     local res = ubus.call("gl-session", "touch", params)
+ 
+@@ -130,6 +247,9 @@
+     ["challenge"] = rpc_method_challenge,
+     ["login"] = rpc_method_login,
+     ["logout"] = rpc_method_logout,
++    ["remember"] = rpc_method_remember,
++    ["resume"] = rpc_method_resume,
++    ["forget"] = rpc_method_forget,
+     ["alive"] = rpc_method_alive,
+     ["call"] = rpc_method_call
+ }

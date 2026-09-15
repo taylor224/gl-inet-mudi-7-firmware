@@ -1,0 +1,306 @@
+-- RPC surface for the cell blacklist.
+--
+-- Loaded by oui.rpc via dofile(), which is why this is plain Lua source rather
+-- than the precompiled chunks the stock modules ship as. Returning a table of
+-- functions is the whole contract; each one takes the params table and returns
+-- a table.
+local cjson = require 'cjson'
+local uci = require 'uci'
+
+local STATE_PATH = '/tmp/gl_cellguard.json'
+
+local M = {}
+
+local function shell(cmd)
+    local f = io.popen(cmd .. ' 2>/dev/null')
+    if not f then return '' end
+    local out = f:read('*a') or ''
+    f:close()
+    return out
+end
+
+local function cursor()
+    return uci.cursor()
+end
+
+local function read_state()
+    local f = io.open(STATE_PATH)
+    if not f then return nil end
+    local raw = f:read('*a')
+    f:close()
+    local ok, decoded = pcall(cjson.decode, raw)
+    return ok and decoded or nil
+end
+
+-- UCI names anonymous sections by position: delete the first `block` and the
+-- name that used to mean it now means the second one. Addressing entries by
+-- that name means a stale id silently removes somebody else's row, so every
+-- entry carries a uid of its own and that is what the API hands out.
+local function new_uid()
+    local f = io.open('/dev/urandom')
+    if not f then return tostring(os.time()) .. tostring(math.random(1e6)) end
+    local bytes = f:read(8) or ''
+    f:close()
+    return (bytes:gsub('.', function(ch) return string.format('%02x', ch:byte()) end))
+end
+
+local function list_blocks(c)
+    local blocks = {}
+    c:foreach('cellguard', 'block', function(s)
+        blocks[#blocks + 1] = {
+            -- Entries written by hand into /etc/config/cellguard have no uid;
+            -- fall back to the section name for those.
+            id = s.uid or s['.name'],
+            section = s['.name'],
+            pci = tonumber(s.pci),
+            earfcn = tonumber(s.earfcn),
+            cid = s.cid,
+            note = s.note or ''
+        }
+    end)
+    return blocks
+end
+
+-- Everything the settings page needs in one call.
+M.get_config = function()
+    local c = cursor()
+    local g = {}
+    c:foreach('cellguard', 'cellguard', function(s)
+        if s['.name'] == 'global' then g = s end
+    end)
+
+    local res = {
+        enabled = g.enabled == '1',
+        interval = tonumber(g.interval) or 5,
+        dwell = tonumber(g.dwell) or 120,
+        min_gain = tonumber(g.min_gain) or 6,
+        sinr_weight = tonumber(g.sinr_weight) or 1.5,
+        nr_bonus = tonumber(g.nr_bonus) or 10,
+        bw_weight = tonumber(g.bw_weight) or 0.5,
+        unlock_when_no_candidate = g.unlock_when_no_candidate ~= '0',
+        blocks = list_blocks(c)
+    }
+    c:close()
+    return res
+end
+
+M.set_config = function(params)
+    params = params or {}
+    local c = cursor()
+
+    local fields = {
+        enabled = 'bool',
+        interval = 'num',
+        dwell = 'num',
+        min_gain = 'num',
+        sinr_weight = 'num',
+        nr_bonus = 'num',
+        bw_weight = 'num',
+        unlock_when_no_candidate = 'bool'
+    }
+
+    for key, kind in pairs(fields) do
+        local v = params[key]
+        if v ~= nil then
+            if kind == 'bool' then
+                c:set('cellguard', 'global', key, v and '1' or '0')
+            else
+                c:set('cellguard', 'global', key, tostring(v))
+            end
+        end
+    end
+
+    c:commit('cellguard')
+    c:close()
+    os.execute('/etc/init.d/gl_cellguard reload >/dev/null 2>&1')
+    return { code = 0 }
+end
+
+-- Live view: what the daemon last saw, plus whether each cell is blacklisted.
+M.get_status = function()
+    local state = read_state()
+    if not state then
+        return { running = false, reason = 'daemon has not reported yet' }
+    end
+    return {
+        running = state.running or false,
+        -- The SIM slot these readings describe. The cellular page is per-slot,
+        -- so it needs this to know whether they are about the slot on screen.
+        slot = state.slot or cjson.null,
+        -- False while the feature is switched off: the daemon still reports
+        -- the serving cell and its neighbours, but changes no lock.
+        enforcing = state.enforcing or false,
+        serving = state.serving or cjson.null,
+        candidates = state.candidates or {},
+        locked = state.locked or cjson.null,
+        -- How much of the escape budget is spent, so the UI can say "tried
+        -- twice, giving up after three" instead of looking idle.
+        escape = state.escape or cjson.null,
+        reason = state.last_reason or '',
+        error = state.last_error or cjson.null,
+        updated = state.updated or 0
+    }
+end
+
+-- Two entries for the same cell are never useful, and pressing "exclude the
+-- tower in use" twice is an easy thing to do. Match the way the daemon does:
+-- full cell id if both sides have one, otherwise pci plus frequency.
+local function same_cell(entry, pci, earfcn, cid)
+    if entry.cid and entry.cid ~= '' and cid and cid ~= '' then
+        return entry.cid:lower() == tostring(cid):lower()
+    end
+    if not entry.pci or not pci then return false end
+    if tonumber(entry.pci) ~= tonumber(pci) then return false end
+    if not entry.earfcn or not earfcn then return true end
+    return tonumber(entry.earfcn) == tonumber(earfcn)
+end
+
+local function find_existing(c, pci, earfcn, cid)
+    for _, entry in ipairs(list_blocks(c)) do
+        if same_cell(entry, pci, earfcn, cid) then return entry end
+    end
+    return nil
+end
+
+local function add_block(c, pci, earfcn, cid, note)
+    local name = c:add('cellguard', 'block')
+    local uid = new_uid()
+    c:set('cellguard', name, 'uid', uid)
+    if pci then c:set('cellguard', name, 'pci', tostring(pci)) end
+    if earfcn then c:set('cellguard', name, 'earfcn', tostring(earfcn)) end
+    if cid and cid ~= '' then c:set('cellguard', name, 'cid', cid) end
+    c:set('cellguard', name, 'note', note or '')
+    return uid
+end
+
+-- Manual entry, or "block this one" from a scan row.
+M.add_block = function(params)
+    params = params or {}
+    local pci = tonumber(params.pci)
+    local earfcn = tonumber(params.earfcn)
+    local cid = params.cid
+
+    if not pci and not (cid and cid ~= '') then
+        return { code = -1, msg = 'need a pci or a cid' }
+    end
+
+    local c = cursor()
+
+    local existing = find_existing(c, pci, earfcn, cid)
+    if existing then
+        c:close()
+        return { code = 0, id = existing.id, existing = true }
+    end
+
+    local name = add_block(c, pci, earfcn, cid, params.note)
+    c:commit('cellguard')
+    c:close()
+    os.execute('/etc/init.d/gl_cellguard reload >/dev/null 2>&1')
+    return { code = 0, id = name }
+end
+
+-- "Exclude the tower I am on right now."
+M.block_current = function(params)
+    params = params or {}
+    local state = read_state()
+    local serving = state and state.serving
+
+    -- The cellular page is per-SIM, but this router keeps both SIMs registered
+    -- and the daemon only ever watches the one carrying data. Acting on the
+    -- other slot's page would exclude a tower that page is not showing -- which
+    -- is indistinguishable, from the outside, from excluding the wrong tower.
+    if params.slot and state and state.slot
+        and tonumber(params.slot) ~= tonumber(state.slot) then
+        return {
+            code = -1,
+            msg = 'this SIM is not the one carrying data, so its tower is not what exclusion acts on',
+            slot = state.slot
+        }
+    end
+
+    if not serving then
+        return { code = -1, msg = 'no serving cell is known yet' }
+    end
+
+    -- On 3G the daemon reports the WCDMA cell so the page can say where the
+    -- modem is, but its psc/uarfcn are not what the blacklist keys on and a
+    -- 4G lock cannot escape it. Nothing useful can be excluded from here.
+    if serving.legacy then
+        return { code = -1, msg = 'the modem is on ' .. tostring(serving.rat) ..
+            ' right now; exclusion works on LTE and 5G cells' }
+    end
+
+    local c = cursor()
+
+    local existing = find_existing(c, serving.pci, serving.earfcn, serving.cid)
+    if existing then
+        c:close()
+        return {
+            code = 0,
+            id = existing.id,
+            existing = true,
+            blocked = {
+                rat = serving.rat,
+                pci = serving.pci,
+                earfcn = serving.earfcn,
+                cid = serving.cid
+            }
+        }
+    end
+
+    local name = add_block(c, serving.pci, serving.earfcn, serving.cid,
+        params.note or 'blocked from the current connection')
+    c:commit('cellguard')
+    c:close()
+    os.execute('/etc/init.d/gl_cellguard reload >/dev/null 2>&1')
+
+    return {
+        code = 0,
+        id = name,
+        blocked = {
+            rat = serving.rat,
+            pci = serving.pci,
+            earfcn = serving.earfcn,
+            cid = serving.cid
+        }
+    }
+end
+
+M.remove_block = function(params)
+    params = params or {}
+    if type(params.id) ~= 'string' or params.id == '' then
+        return { code = -1, msg = 'id required' }
+    end
+
+    local c = cursor()
+
+    -- Resolve the uid to whatever section currently holds it, rather than
+    -- trusting the caller's id to still be a section name.
+    local section
+    for _, entry in ipairs(list_blocks(c)) do
+        if entry.id == params.id then section = entry.section end
+    end
+
+    if not section then
+        c:close()
+        return { code = -1, msg = 'that entry is no longer in the list' }
+    end
+
+    c:delete('cellguard', section)
+    c:commit('cellguard')
+    c:close()
+    os.execute('/etc/init.d/gl_cellguard reload >/dev/null 2>&1')
+    return { code = 0 }
+end
+
+-- Raw AT output, for confirming +QENG field positions on this modem.
+M.probe = function()
+    return { output = shell('/usr/bin/lua /usr/bin/gl_cellguard probe') }
+end
+
+M.unlock = function()
+    shell('/usr/bin/lua /usr/bin/gl_cellguard unlock')
+    return { code = 0 }
+end
+
+return M

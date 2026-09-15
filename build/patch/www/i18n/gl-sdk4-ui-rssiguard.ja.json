@@ -1,0 +1,28 @@
+{
+  "rssiguard": {
+    "title": "Minimum RSSI",
+    "intro_tips": "Clients whose signal stays below the floor are disconnected and briefly blocked, so they associate somewhere with a better link. With only one access point in range there is nowhere else to go: a disconnected client simply loses service until the block expires.",
+    "enable_label": "Disconnect weak clients",
+    "threshold_label": "Minimum RSSI",
+    "threshold_tips": "-75 dBm is a usable floor, -80 lenient, -70 aggressive.",
+    "strikes_label": "Consecutive readings",
+    "strikes_tips": "Signal swings a few dB between samples, so a client must stay below the floor this many polls in a row.",
+    "ban_time_label": "Block for",
+    "ban_time_tips": "A disconnected client re-associates within a second. Without a short block, nothing changes. 0 disconnects without blocking.",
+    "grace_label": "Settling time",
+    "grace_tips": "Ignore a client for this long after it connects, while the link settles.",
+    "interval_label": "Check every",
+    "clients_title": "Connected clients",
+    "no_clients": "No clients are connected.",
+    "recent_title": "Recently disconnected",
+    "no_recent": "Nothing has been disconnected yet.",
+    "strikes_col": "Below floor",
+    "exempt_col": "Never disconnected",
+    "settling_col": "Settling",
+    "blocked_col": "Blocked",
+    "stopped_tips": "The daemon is not running.",
+    "seconds_unit": "s",
+    "dbm_unit": "dBm",
+    "observing_note": "Signals are being watched, but nobody is disconnected while this is off. Use the list below to pick a threshold, then switch it on."
+  }
+}

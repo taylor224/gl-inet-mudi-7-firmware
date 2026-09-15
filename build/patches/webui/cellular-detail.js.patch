@@ -1,0 +1,607 @@
+--- a/cellular-detail.js
++++ b/cellular-detail.js
+@@ -1742,7 +1742,7 @@
+   aa5c: function (t, e, n) {
+     ((e = n('24fb')(!1)).push([
+       t.i,
+-      '.scan-btn[data-v-4b4943f0]{min-width:124px;height:36px}.modem-lock-tower.has-sim2[data-v-4b4943f0] .el-tabs.el-tabs--card.is-card{box-shadow:none!important}.modem-lock-tower.has-sim2[data-v-4b4943f0] .el-tabs__header{margin:0!important}.modem-lock-tower.has-sim2[data-v-4b4943f0] .el-drawer__header{border-bottom:none!important;padding:0!important}.modem-lock-tower .warning-tips[data-v-4b4943f0]{margin-bottom:10px}.modem-lock-tower .tower-list>li[data-v-4b4943f0]{display:flex;align-items:center}.modem-lock-tower .tower-list>li.title-li[data-v-4b4943f0]{margin:10px 0;justify-content:space-between;padding:0 10px;height:40px;color:var(--text-subtitle);font-size:14px;font-weight:700;border-radius:5px;background-color:var(--background-subtitle)}.modem-lock-tower .tower-list>li.scan-tips-li[data-v-4b4943f0]{padding:60px 0;flex-direction:column;justify-content:center;text-align:center;color:var(--text-weak)}.modem-lock-tower .tower-list>li.scan-tips-li .tips[data-v-4b4943f0]{margin-top:16px}.modem-lock-tower .tower-list>li.scan-tips-li .scan-btn[data-v-4b4943f0]{min-width:124px;height:36px}.modem-lock-tower .tower-list>li.tower-item[data-v-4b4943f0]{padding:5px 10px;min-height:50px;color:var(--text-weak);border-radius:5px;cursor:pointer}.modem-lock-tower .tower-list>li.tower-item[data-v-4b4943f0]:hover{background-color:var(--secondary-background)}.modem-lock-tower .tower-list>li.tower-item .info-main[data-v-4b4943f0]{flex:1;display:flex;align-items:center;justify-content:space-between;margin-left:10px}.modem-lock-tower .tower-list>li.tower-item .info-main .info[data-v-4b4943f0]{flex:1;display:flex;flex-direction:column;justify-content:center}.modem-lock-tower .tower-list>li.tower-item .info-main .info>span[data-v-4b4943f0]{display:flex;align-items:center}.modem-lock-tower .tower-list>li.tower-item .info-main .info .carrier[data-v-4b4943f0]{display:inline-block;max-width:20ch;margin-right:10px}.modem-lock-tower .tower-list>li.tower-item .info-main .info .carrier .name[data-v-4b4943f0]{font-size:16px;line-height:1.6}.modem-lock-tower .tower-list>li.tower-item .info-main .info .country-name[data-v-4b4943f0]{margin-right:10px}.modem-lock-tower .tower-list>li.tower-item .info-main .info .secondary[data-v-4b4943f0]{font-size:12px;color:var(--text-disabled)}.modem-lock-tower .tower-list>li.tower-item .info-main .badge[data-v-4b4943f0]{color:var(--text-badge);border:1px solid var(--text-badge);font-size:12px;margin-left:10px;min-width:60px;height:23px;border-radius:5px;padding:0 8px;display:flex;align-items:center;justify-content:center}.modem-lock-tower .info-list>li[data-v-4b4943f0]{display:flex;align-items:center;justify-content:space-between;padding:14px 10px;color:var(--text-weak)}.modem-lock-tower .info-list>li.divider-li[data-v-4b4943f0]{padding:0;border-top:1px solid var(--divider)}.modem-lock-tower .info-list>li .badge[data-v-4b4943f0]{color:var(--text-badge);border:1px solid var(--text-badge);font-size:12px;margin-left:10px;min-width:60px;height:23px;border-radius:5px;padding:0 8px;display:flex;align-items:center;justify-content:center}.modem-lock-tower .lock-tower-title[data-v-4b4943f0]{width:100%;display:flex;align-items:center;justify-content:space-between}.modem-lock-tower .lock-tower-title .title[data-v-4b4943f0]{flex:1;display:flex;align-items:center}.modem-lock-tower .lock-tower-title .title .badge[data-v-4b4943f0]{display:flex;align-items:center;justify-content:center;font-size:12px;margin-left:10px;min-width:60px;height:23px;border-radius:5px;padding:0 8px}.modem-lock-tower .lock-tower-title .title .badge .iconfont[data-v-4b4943f0]{margin-right:4px;font-size:12px;font-weight:400}.modem-lock-tower .lock-tower-title .title .badge.is-lock[data-v-4b4943f0]{background-color:var(--secondary);color:#fff}.modem-lock-tower .lock-tower-title .title .badge.is-unlock[data-v-4b4943f0]{color:var(--text-badge);border:1px solid var(--text-badge)}@media screen and (max-width:440px){.modem-lock-tower .tower-list .tower-item .info-main .info .carrier[data-v-4b4943f0] .ellipsis-span{max-width:110px}}',
++      '.scan-btn[data-v-4b4943f0]{min-width:124px;height:36px}.modem-lock-tower.has-sim2[data-v-4b4943f0] .el-tabs.el-tabs--card.is-card{box-shadow:none!important}.modem-lock-tower.has-sim2[data-v-4b4943f0] .el-tabs__header{margin:0!important}.modem-lock-tower.has-sim2[data-v-4b4943f0] .el-drawer__header{border-bottom:none!important;padding:0!important}.modem-lock-tower .warning-tips[data-v-4b4943f0]{margin-bottom:10px}.modem-lock-tower .tower-list>li[data-v-4b4943f0]{display:flex;align-items:center}.modem-lock-tower .tower-list>li.title-li[data-v-4b4943f0]{margin:10px 0;justify-content:space-between;padding:0 10px;height:40px;color:var(--text-subtitle);font-size:14px;font-weight:700;border-radius:5px;background-color:var(--background-subtitle)}.modem-lock-tower .tower-list>li.scan-tips-li[data-v-4b4943f0]{padding:60px 0;flex-direction:column;justify-content:center;text-align:center;color:var(--text-weak)}.modem-lock-tower .tower-list>li.scan-tips-li .tips[data-v-4b4943f0]{margin-top:16px}.modem-lock-tower .tower-list>li.scan-tips-li .scan-btn[data-v-4b4943f0]{min-width:124px;height:36px}.modem-lock-tower .btns .btn-icon .block-count[data-v-4b4943f0]{position:absolute;top:-2px;right:-6px;font-style:normal;font-size:11px;line-height:1;padding:2px 5px;border-radius:50px;background-color:var(--primary);color:#fff}.modem-lock-tower .btns .btn-icon[data-v-4b4943f0]{position:relative}.modem-lock-tower .tower-list>li.tower-item .tower-action[data-v-4b4943f0]{flex-shrink:0;margin-left:10px;width:28px;height:28px;display:flex;align-items:center;justify-content:center;border-radius:5px;font-size:14px;color:var(--text-disabled);cursor:pointer}.modem-lock-tower .tower-list>li.tower-item .tower-action[data-v-4b4943f0]:hover{color:var(--error);background-color:var(--background-subtitle)}.modem-lock-tower .tower-list>li.tower-item .tower-action.is-on[data-v-4b4943f0]{color:var(--error)}.modem-lock-tower .tower-list>li.block-form-li[data-v-4b4943f0]{flex-direction:column;align-items:stretch;padding:4px 10px 10px}.modem-lock-tower .tower-list>li.block-form-li .block-form[data-v-4b4943f0]{display:flex;flex-wrap:wrap;gap:8px}.modem-lock-tower .tower-list>li.block-form-li .block-form .el-input[data-v-4b4943f0]{flex:1 1 130px;min-width:110px}.modem-lock-tower .tower-list>li.block-form-li .block-form .add-btn[data-v-4b4943f0]{flex:0 0 auto;min-width:88px;height:36px}.modem-lock-tower .tower-list>li.block-form-li .form-tips[data-v-4b4943f0]{margin:8px 0 0;font-size:12px;color:var(--text-disabled);line-height:1.5}.modem-lock-tower .tower-list>li.block-current-li[data-v-4b4943f0]{padding:4px 10px 10px}.block-current-li .block-current-note[data-v-4b4943f0]{display:block;font-size:13px;line-height:1.5;color:var(--text-disabled)}.modem-lock-tower .tower-list>li.tower-item[data-v-4b4943f0]{padding:5px 10px;min-height:50px;color:var(--text-weak);border-radius:5px;cursor:pointer}.modem-lock-tower .tower-list>li.tower-item[data-v-4b4943f0]:hover{background-color:var(--secondary-background)}.modem-lock-tower .tower-list>li.tower-item .info-main[data-v-4b4943f0]{flex:1;display:flex;align-items:center;justify-content:space-between;margin-left:10px}.modem-lock-tower .tower-list>li.tower-item .info-main .info[data-v-4b4943f0]{flex:1;display:flex;flex-direction:column;justify-content:center}.modem-lock-tower .tower-list>li.tower-item .info-main .info>span[data-v-4b4943f0]{display:flex;align-items:center}.modem-lock-tower .tower-list>li.tower-item .info-main .info .carrier[data-v-4b4943f0]{display:inline-block;max-width:20ch;margin-right:10px}.modem-lock-tower .tower-list>li.tower-item .info-main .info .carrier .name[data-v-4b4943f0]{font-size:16px;line-height:1.6}.modem-lock-tower .tower-list>li.tower-item .info-main .info .country-name[data-v-4b4943f0]{margin-right:10px}.modem-lock-tower .tower-list>li.tower-item .info-main .info .secondary[data-v-4b4943f0]{font-size:12px;color:var(--text-disabled)}.modem-lock-tower .tower-list>li.tower-item .info-main .badge[data-v-4b4943f0]{color:var(--text-badge);border:1px solid var(--text-badge);font-size:12px;margin-left:10px;min-width:60px;height:23px;border-radius:5px;padding:0 8px;display:flex;align-items:center;justify-content:center}.modem-lock-tower .info-list>li[data-v-4b4943f0]{display:flex;align-items:center;justify-content:space-between;padding:14px 10px;color:var(--text-weak)}.modem-lock-tower .info-list>li.divider-li[data-v-4b4943f0]{padding:0;border-top:1px solid var(--divider)}.modem-lock-tower .info-list>li .badge[data-v-4b4943f0]{color:var(--text-badge);border:1px solid var(--text-badge);font-size:12px;margin-left:10px;min-width:60px;height:23px;border-radius:5px;padding:0 8px;display:flex;align-items:center;justify-content:center}.modem-lock-tower .lock-tower-title[data-v-4b4943f0]{width:100%;display:flex;align-items:center;justify-content:space-between}.modem-lock-tower .lock-tower-title .title[data-v-4b4943f0]{flex:1;display:flex;align-items:center}.modem-lock-tower .lock-tower-title .title .badge[data-v-4b4943f0]{display:flex;align-items:center;justify-content:center;font-size:12px;margin-left:10px;min-width:60px;height:23px;border-radius:5px;padding:0 8px}.modem-lock-tower .lock-tower-title .title .badge .iconfont[data-v-4b4943f0]{margin-right:4px;font-size:12px;font-weight:400}.modem-lock-tower .lock-tower-title .title .badge.is-lock[data-v-4b4943f0]{background-color:var(--secondary);color:#fff}.modem-lock-tower .lock-tower-title .title .badge.is-unlock[data-v-4b4943f0]{color:var(--text-badge);border:1px solid var(--text-badge)}@media screen and (max-width:440px){.modem-lock-tower .tower-list .tower-item .info-main .info .carrier[data-v-4b4943f0] .ellipsis-span{max-width:110px}}',
+       ''
+     ]),
+       (t.exports = e));
+@@ -3398,7 +3398,20 @@
+           scanning: !1,
+           step: 'list',
+           networkModeOptions: E,
+-          slot: {}
++          slot: {},
++          // Cell blacklist, served by the cellguard RPC object. guardReady is
++          // null until the first probe answers and false on firmware without
++          // the daemon, where none of this renders.
++          blockedTowers: [],
++          guardReady: null,
++          guardEnforcing: !1,
++          // The SIM slot the daemon is watching. Both SIMs stay registered on
++          // this router, but only the one carrying data has a tower worth
++          // excluding, so this page shows the exclude-current button only when
++          // the slot it is displaying is that one. Null until the first answer.
++          guardSlot: null,
++          blockBusy: !1,
++          blockForm: { pci: '', earfcn: '', cid: '', note: '' }
+         }),
+         computed: {
+           towerInfoList() {
+@@ -3472,10 +3485,28 @@
+           },
+           isLocked() {
+             return Boolean(this.slot.cellid);
++          },
++          // Whether the slot this page is showing is the one the daemon reads.
++          // Unknown slots count as a match: on a single-SIM unit the daemon
++          // reports no slot at all, and hiding the button there would be a
++          // regression.
++          guardSlotActive() {
++            if (null == this.guardSlot) return !0;
++            const t = Number(this.queryParams.slot);
++            if (!Number.isFinite(t)) return !0;
++            return Number(this.guardSlot) === t;
++          },
++          // A PCI on its own is a valid entry; a cell id alone is too. Without
++          // either there is nothing to match on.
++          canAddManual() {
++            return Boolean(
++              String(this.blockForm.pci).trim() || String(this.blockForm.cid).trim()
++            );
+           }
+         },
+         created() {
+           this.getCellTower();
++          this.loadBlockedTowers();
+         },
+         methods: {
+           getTowerName(t) {
+@@ -3502,6 +3533,11 @@
+               }
+             });
+           },
++          // Open the drawer straight on the blacklist, for the entry point
++          // that sits beside Lock Tower rather than inside it.
++          doShowBlocked() {
++            (this.loadBlockedTowers(), (this.step = 'blocked'), (this.showTower = !0));
++          },
+           doShow() {
+             ((this.towers = []),
+               this.getCellTower(() => {
+@@ -3569,8 +3605,163 @@
+                 },
+                 () => {
+                   ((this.towers = []), (this.scanning = !1), this.$globalLoading.close());
++                }
++              ));
++          },
++
++          // ---- cell blacklist ------------------------------------------
++          //
++          // The modem can only be told to lock ON to a cell; there is no
++          // "avoid this one" command. gl_cellguard builds exclusion on top of
++          // that by watching the serving cell and re-locking away from
++          // blacklisted ones. This is its front end.
++          cellguardCall(method, params, quiet) {
++            return window.$rpcRequest('call', ['sid', 'cellguard', method, params || {}], {
++              timeout: 2e4,
++              ignoreCoreErrTips: Boolean(quiet)
++            });
++          },
++          loadGuardStatus() {
++            this.cellguardCall('get_status', {}, !0).then(
++              (t) => {
++                ((this.guardEnforcing = Boolean(t && t.enforcing)),
++                  (this.guardSlot = t && null != t.slot ? Number(t.slot) : null));
++              },
++              () => {}
++            );
++          },
++          loadBlockedTowers() {
++            this.loadGuardStatus();
++            // Quiet: on firmware without the daemon this call is expected to
++            // fail, and it should fail without a toast.
++            this.cellguardCall('get_config', {}, !0).then(
++              (t) => {
++                ((this.guardReady = !0),
++                  (this.blockedTowers = (t && t.blocks) || []),
++                  this.emitGuardStatus());
++              },
++              () => {
++                ((this.guardReady = !1), (this.blockedTowers = []), this.emitGuardStatus());
++              }
++            );
++          },
++          // The parent owns the entry row, so it needs to know whether the
++          // daemon is there and how many cells are excluded.
++          emitGuardStatus() {
++            this.$emit('updateGuardStatus', {
++              available: Boolean(this.guardReady),
++              count: this.blockedTowers.length
++            });
++          },
++          // A scanned tower and a blacklist entry are the same cell when their
++          // cell ids match, or when PCI and frequency both do. Neighbour scans
++          // do not always report a cell id, so PCI+frequency is the key that
++          // always works.
++          towerBlocked(t) {
++            return this.blockedTowers.some((e) => {
++              if (e.cid && t.cellid)
++                return String(e.cid).toLowerCase() === String(t.cellid).toLowerCase();
++              if (null == e.pci || null == t.pci) return !1;
++              if (Number(e.pci) !== Number(t.pci)) return !1;
++              return null == e.earfcn || Number(e.earfcn) === Number(t.freq);
++            });
++          },
++          // The RPC layer resolves whenever the *call* succeeded, so a module
++          // that answers { code: -1, msg: "..." } lands in the success branch.
++          // Reading the payload is what separates a refusal from a result --
++          // without this the UI announced "Applied!" for operations that had
++          // done nothing at all.
++          afterBlockChange(t) {
++            this.blockBusy = !1;
++            this.$message.closeAll();
++
++            if (t && 'number' == typeof t.code && 0 !== t.code) {
++              this.$message.error(t.msg || this.$t('msg.unknown_err'));
++              this.loadBlockedTowers();
++              return !1;
++            }
++
++            // Adding a cell that is already listed succeeds without changing
++            // anything. Saying "Applied!" there is misleading -- nothing was.
++            if (t && t.existing) {
++              (this.$message.warning(this.$t('cellguard.already_excluded')),
++                this.loadBlockedTowers());
++              return !1;
++            }
++
++            (this.$message.success(this.$t('msg.success')), this.loadBlockedTowers());
++            return !0;
++          },
++          blockTower(t) {
++            if (this.blockBusy || this.towerBlocked(t)) return;
++            ((this.blockBusy = !0),
++              this.cellguardCall('add_block', {
++                pci: t.pci,
++                earfcn: t.freq,
++                cid: t.cellid,
++                note: this.getTowerName(t)
++              }).then(
++                (t) => this.afterBlockChange(t),
++                () => {
++                  this.blockBusy = !1;
+                 }
+               ));
++          },
++          blockCurrentTower() {
++            if (this.blockBusy || !this.guardSlotActive) return;
++            // The slot travels with the request so a page left open across a
++            // SIM failover is refused rather than acting on the other SIM.
++            ((this.blockBusy = !0),
++              this.cellguardCall('block_current', { slot: this.queryParams.slot }).then(
++                (t) => this.afterBlockChange(t),
++                () => {
++                  this.blockBusy = !1;
++                }
++              ));
++          },
++          unblockTower(t) {
++            if (this.blockBusy) return;
++            ((this.blockBusy = !0),
++              this.cellguardCall('remove_block', { id: t }).then(
++                (t) => this.afterBlockChange(t),
++                () => {
++                  this.blockBusy = !1;
++                }
++              ));
++          },
++          addManualBlock() {
++            if (!this.canAddManual || this.blockBusy) return;
++            const t = {
++              note: String(this.blockForm.note).trim(),
++              cid: String(this.blockForm.cid).trim()
++            };
++            const e = String(this.blockForm.pci).trim();
++            const n = String(this.blockForm.earfcn).trim();
++            if (e) t.pci = Number(e);
++            if (n) t.earfcn = Number(n);
++            ((this.blockBusy = !0),
++              this.cellguardCall('add_block', t).then(
++                (res) => {
++                  if (this.afterBlockChange(res)) {
++                    this.blockForm = { pci: '', earfcn: '', cid: '', note: '' };
++                  }
++                },
++                () => {
++                  this.blockBusy = !1;
++                }
++              ));
++          },
++          blockedLabel(t) {
++            return t.note || (t.cid ? 'Cell ID ' + t.cid : 'PCI ' + t.pci);
++          },
++          blockedSecondary(t) {
++            return [
++              null != t.pci ? 'PCI ' + t.pci : '',
++              null != t.earfcn ? 'EARFCN ' + t.earfcn : '',
++              t.cid ? 'Cell ID ' + t.cid : ''
++            ]
++              .filter(Boolean)
++              .join(' \u00b7 ');
+           }
+         }
+       },
+@@ -3620,18 +3811,23 @@
+                         ]
+                       )
+                     ]),
+-                    e('div', { staticClass: 'btns' }, [
+-                      t.scanning
+-                        ? t._e()
+-                        : e('i', {
+-                            staticClass: 'btn-icon iconfont icon-wrong',
+-                            on: {
+-                              click: function (e) {
+-                                t.showTower = !1;
++                    e(
++                      'div',
++                      { staticClass: 'btns' },
++                      [
++                        t.scanning
++                          ? t._e()
++                          : e('i', {
++                              staticClass: 'btn-icon iconfont icon-wrong',
++                              on: {
++                                click: function (e) {
++                                  t.showTower = !1;
++                                }
+                               }
+-                            }
+-                          })
+-                    ])
++                            })
++                      ],
++                      1
++                    )
+                   ]
+                 ),
+                 e(
+@@ -3790,8 +3986,37 @@
+                                             ]),
+                                             e('span', { staticClass: 'badge' }, [
+                                               t._v(' ' + t._s(n.network_type) + ' ')
+-                                            ])
+-                                          ])
++                                            ]),
++                                            t.guardReady
++                                              ? e(
++                                                  'el-tooltip',
++                                                  {
++                                                    attrs: {
++                                                      content: t.towerBlocked(n)
++                                                        ? t.$t('cellguard.excluded_label')
++                                                        : t.$t('cellguard.exclude_label')
++                                                    }
++                                                  },
++                                                  [
++                                                    e('i', {
++                                                      staticClass: 'tower-action iconfont',
++                                                      class: t.towerBlocked(n)
++                                                        ? 'icon-hide is-on'
++                                                        : 'icon-wrong',
++                                                      on: {
++                                                        // The row itself opens
++                                                        // the detail view, so
++                                                        // this click must not
++                                                        // bubble.
++                                                        click: function (ev) {
++                                                          (ev.stopPropagation(), t.blockTower(n));
++                                                        }
++                                                      }
++                                                    })
++                                                  ]
++                                                )
++                                              : t._e()
++                                          ], 1)
+                                         ],
+                                         1
+                                       );
+@@ -3895,6 +4120,166 @@
+                             2
+                           )
+                         ]
++                      : 'blocked' === t.step
++                        ? [
++                            e('gl-tips', {
++                              staticClass: 'warning-tips',
++                              attrs: {
++                                tips: t.guardEnforcing
++                                  ? t.$t('cellguard.intro_tips')
++                                  : t.$t('cellguard.observing_note')
++                              }
++                            }),
++                            e(
++                              'ul',
++                              { staticClass: 'tower-list' },
++                              [
++                                e('li', { staticClass: 'title-li' }, [
++                                  e('span', [t._v(' ' + t._s(t.$t('cellguard.title')) + ' ')]),
++                                  e('span', [t._v(t._s(t.blockedTowers.length))])
++                                ]),
++                                t.blockedTowers.length
++                                  ? t._l(t.blockedTowers, function (b) {
++                                      return e('li', { key: b.id, staticClass: 'tower-item' }, [
++                                        e(
++                                          'div',
++                                          { staticClass: 'info-main' },
++                                          [
++                                            e('div', { staticClass: 'info' }, [
++                                              e('span', [
++                                                e('i', { staticClass: 'carrier' }, [
++                                                  t._v(t._s(t.blockedLabel(b)))
++                                                ])
++                                              ]),
++                                              e('span', { staticClass: 'secondary' }, [
++                                                t._v(' ' + t._s(t.blockedSecondary(b)) + ' ')
++                                              ])
++                                            ]),
++                                            e(
++                                              'el-tooltip',
++                                              { attrs: { content: t.$t('cellguard.remove_label') } },
++                                              [
++                                                e('i', {
++                                                  staticClass: 'tower-action iconfont icon-delete',
++                                                  on: {
++                                                    click: function (ev) {
++                                                      return t.unblockTower(b.id);
++                                                    }
++                                                  }
++                                                })
++                                              ]
++                                            )
++                                          ],
++                                          1
++                                        )
++                                      ]);
++                                    })
++                                  : e('li', { staticClass: 'scan-tips-li' }, [
++                                      e('span', { staticClass: 'tips' }, [
++                                        t._v(' ' + t._s(t.$t('cellguard.empty_tips')) + ' ')
++                                      ])
++                                    ]),
++                                e('li', { staticClass: 'title-li' }, [
++                                  e('span', [t._v(' ' + t._s(t.$t('cellguard.add_title')) + ' ')])
++                                ]),
++                                e(
++                                  'li',
++                                  { staticClass: 'block-form-li' },
++                                  [
++                                    e(
++                                      'div',
++                                      { staticClass: 'block-form' },
++                                      [
++                                        e('el-input', {
++                                          attrs: {
++                                            placeholder: t.$t('cellguard.pci_placeholder'),
++                                            value: t.blockForm.pci
++                                          },
++                                          on: {
++                                            input: function (v) {
++                                              t.$set(t.blockForm, 'pci', v);
++                                            }
++                                          }
++                                        }),
++                                        e('el-input', {
++                                          attrs: {
++                                            placeholder: t.$t('cellguard.earfcn_placeholder'),
++                                            value: t.blockForm.earfcn
++                                          },
++                                          on: {
++                                            input: function (v) {
++                                              t.$set(t.blockForm, 'earfcn', v);
++                                            }
++                                          }
++                                        }),
++                                        e('el-input', {
++                                          attrs: {
++                                            placeholder: t.$t('cellguard.cid_placeholder'),
++                                            value: t.blockForm.cid
++                                          },
++                                          on: {
++                                            input: function (v) {
++                                              t.$set(t.blockForm, 'cid', v);
++                                            }
++                                          }
++                                        }),
++                                        e('el-input', {
++                                          attrs: {
++                                            placeholder: t.$t('cellguard.note_placeholder'),
++                                            value: t.blockForm.note
++                                          },
++                                          on: {
++                                            input: function (v) {
++                                              t.$set(t.blockForm, 'note', v);
++                                            }
++                                          }
++                                        }),
++                                        e(
++                                          'gl-button',
++                                          {
++                                            staticClass: 'add-btn',
++                                            attrs: { type: 'primary', disabled: !t.canAddManual },
++                                            on: { click: t.addManualBlock }
++                                          },
++                                          [t._v(t._s(t.$t('cellguard.add_label')))]
++                                        )
++                                      ],
++                                      1
++                                    ),
++                                    e('p', { staticClass: 'form-tips' }, [
++                                      t._v(' ' + t._s(t.$t('cellguard.key_tips')) + ' ')
++                                    ])
++                                  ]
++                                ),
++                                e(
++                                  'li',
++                                  { staticClass: 'block-current-li' },
++                                  [
++                                    t.guardSlotActive
++                                      ? e(
++                                          'gl-button',
++                                          {
++                                            staticClass: 'scan-btn',
++                                            on: { click: t.blockCurrentTower }
++                                          },
++                                          [
++                                            t._v(
++                                              ' ' +
++                                                t._s(t.$t('cellguard.exclude_current_label')) +
++                                                ' '
++                                            )
++                                          ]
++                                        )
++                                      : e('span', { staticClass: 'block-current-note' }, [
++                                          t._v(' ' + t._s(t.$t('cellguard.other_sim_tips')) + ' ')
++                                        ])
++                                  ],
++                                  1
++                                )
++                              ],
++                              2
++                            )
++                          ]
+                       : [
+                           e('gl-tips', {
+                             staticClass: 'warning-tips',
+@@ -4024,20 +4409,35 @@
+                               [t._v(' ' + t._s(t.$t('core.lock')) + ' ')]
+                             )
+                           ]
+-                        : [
+-                            e(
+-                              'gl-button',
+-                              {
+-                                staticClass: 'btn-item',
+-                                on: {
+-                                  click: function (e) {
+-                                    t.showTower = !1;
++                        : 'blocked' === t.step
++                          ? [
++                              e(
++                                'gl-button',
++                                {
++                                  staticClass: 'btn-item',
++                                  on: {
++                                    click: function (e) {
++                                      t.step = 'list';
++                                    }
+                                   }
+-                                }
+-                              },
+-                              [t._v(t._s(t.$t('core.back')))]
+-                            )
+-                          ]
++                                },
++                                [t._v(t._s(t.$t('core.back')))]
++                              )
++                            ]
++                          : [
++                              e(
++                                'gl-button',
++                                {
++                                  staticClass: 'btn-item',
++                                  on: {
++                                    click: function (e) {
++                                      t.showTower = !1;
++                                    }
++                                  }
++                                },
++                                [t._v(t._s(t.$t('core.back')))]
++                              )
++                            ]
+                   ],
+                   2
+                 )
+@@ -4662,7 +5062,12 @@
+           lockedOperatorStatus: !1,
+           lockedOperatorConfigs: {},
+           lockedTowerStatus: !1,
+-          lockedTowerConfigs: {}
++          lockedTowerConfigs: {},
++          // Reported by the lock-tower child once it has probed for the
++          // cellguard daemon. The Exclude Tower row stays hidden until then,
++          // so firmware without the daemon shows no dead entry.
++          excludeTowerAvailable: !1,
++          excludeTowerCount: 0
+         }),
+         created() {
+           this.getBandConfig();
+@@ -4808,6 +5213,12 @@
+           },
+           handleShowLockTower() {
+             this.lockedOperatorStatus || this.$refs.modemLockTower.doShow();
++          },
++          handleShowExcludeTower() {
++            this.$refs.modemLockTower.doShowBlocked();
++          },
++          updateGuardStatus({ available: t, count: e }) {
++            ((this.excludeTowerAvailable = t), (this.excludeTowerCount = e));
+           },
+           updateLockedOperatorStatus({ status: t, configs: e }) {
+             ((this.lockedOperatorStatus = t), (this.lockedOperatorConfigs = { ...e }));
+@@ -5215,7 +5626,37 @@
+                           1
+                         )
+                       ]
+-                    )
++                    ),
++                    t.excludeTowerAvailable
++                      ? e(
++                          'li',
++                          {
++                            staticClass: 'clickable-li',
++                            on: { click: t.handleShowExcludeTower }
++                          },
++                          [
++                            e('div', [t._v(' ' + t._s(t.$t('cellguard.entry_label')) + ' ')]),
++                            e('div', [
++                              e('i', {
++                                staticClass: 'iconfont',
++                                class: t.excludeTowerCount ? 'icon-hide' : 'icon-show'
++                              }),
++                              e('span', [
++                                t._v(
++                                  t._s(
++                                    t.excludeTowerCount
++                                      ? t.$t('cellguard.count_label', {
++                                          count: t.excludeTowerCount
++                                        })
++                                      : t.$t('cellguard.none_label')
++                                  )
++                                )
++                              ]),
++                              e('span', { staticClass: 'iconfont icon-chevron-down' })
++                            ])
++                          ]
++                        )
++                      : t._e()
+                   ],
+                   2
+                 ),
+@@ -5251,7 +5692,10 @@
+                     dialing: t.dialing,
+                     networkMode: t.networkMode
+                   },
+-                  on: { updateLockedTowerStatus: t.updateLockedTowerStatus }
++                  on: {
++                    updateLockedTowerStatus: t.updateLockedTowerStatus,
++                    updateGuardStatus: t.updateGuardStatus
++                  }
+                 })
+               ],
+               1

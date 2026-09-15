@@ -1,0 +1,2 @@
+# One rootfs path per line, removed before the patch tree is copied in.
+# Leading slash optional. Lines starting with # are ignored.

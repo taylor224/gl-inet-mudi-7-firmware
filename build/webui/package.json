@@ -1,0 +1,16 @@
+{
+  "name": "e5800-webui",
+  "private": true,
+  "version": "1.0.0",
+  "description": "De-minify, verify and repack the e5800 admin panel view bundles",
+  "type": "module",
+  "scripts": {
+    "beautify": "node tools/beautify.mjs",
+    "verify": "node tools/verify.mjs",
+    "pack": "node tools/pack.mjs"
+  },
+  "dependencies": {
+    "acorn": "8.18.0",
+    "prettier": "3.9.6"
+  }
+}

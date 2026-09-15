@@ -1,0 +1,138 @@
+-- RPC surface for minimum-RSSI enforcement.
+--
+-- Loaded by oui.rpc through dofile(), so plain Lua source is the format; the
+-- contract is a table of functions taking the params table.
+local cjson = require 'cjson'
+local uci = require 'uci'
+
+local STATE_PATH = '/tmp/gl_rssiguard.json'
+
+local M = {}
+
+local function read_state()
+    local f = io.open(STATE_PATH)
+    if not f then return nil end
+    local raw = f:read('*a')
+    f:close()
+    local ok, decoded = pcall(cjson.decode, raw)
+    return ok and decoded or nil
+end
+
+local function list_exempt(c)
+    local out = {}
+    c:foreach('rssiguard', 'exempt', function(s)
+        out[#out + 1] = { id = s['.name'], mac = s.mac or '', note = s.note or '' }
+    end)
+    return out
+end
+
+M.get_config = function()
+    local c = uci.cursor()
+    local g = {}
+    c:foreach('rssiguard', 'rssiguard', function(s)
+        if s['.name'] == 'global' then g = s end
+    end)
+
+    local res = {
+        enabled = g.enabled == '1',
+        min_rssi = tonumber(g.min_rssi) or -75,
+        interval = tonumber(g.interval) or 10,
+        strikes = tonumber(g.strikes) or 3,
+        ban_time = tonumber(g.ban_time) or 30,
+        grace = tonumber(g.grace) or 30,
+        exempt = list_exempt(c)
+    }
+    c:close()
+    return res
+end
+
+M.set_config = function(params)
+    params = params or {}
+    local c = uci.cursor()
+
+    local fields = {
+        enabled = 'bool',
+        min_rssi = 'num',
+        interval = 'num',
+        strikes = 'num',
+        ban_time = 'num',
+        grace = 'num'
+    }
+
+    for key, kind in pairs(fields) do
+        local v = params[key]
+        if v ~= nil then
+            if kind == 'bool' then
+                c:set('rssiguard', 'global', key, v and '1' or '0')
+            else
+                c:set('rssiguard', 'global', key, tostring(v))
+            end
+        end
+    end
+
+    c:commit('rssiguard')
+    c:close()
+    os.execute('/etc/init.d/gl_rssiguard reload >/dev/null 2>&1')
+    return { code = 0 }
+end
+
+-- Live view: every associated client with its signal and strike count, plus
+-- the recent disconnections, so the effect of a threshold is visible before
+-- and after it is changed.
+M.get_status = function()
+    local state = read_state()
+    if not state then
+        return { running = false, clients = {}, recent = {} }
+    end
+    return {
+        running = state.running or false,
+        -- False while the feature is switched off: the daemon still reports
+        -- every client's signal so a threshold can be chosen, but disconnects
+        -- nobody.
+        enforcing = state.enforcing or false,
+        clients = state.clients or {},
+        recent = state.recent or {},
+        error = state.last_error or cjson.null,
+        updated = state.updated or 0
+    }
+end
+
+M.add_exempt = function(params)
+    params = params or {}
+    local mac = tostring(params.mac or ''):upper()
+
+    if not mac:match('^%x%x:%x%x:%x%x:%x%x:%x%x:%x%x$') then
+        return { code = -1, msg = 'mac must look like AA:BB:CC:DD:EE:FF' }
+    end
+
+    local c = uci.cursor()
+    local name = c:add('rssiguard', 'exempt')
+    c:set('rssiguard', name, 'mac', mac)
+    c:set('rssiguard', name, 'note', params.note or '')
+    c:commit('rssiguard')
+    c:close()
+    os.execute('/etc/init.d/gl_rssiguard reload >/dev/null 2>&1')
+    return { code = 0, id = name }
+end
+
+M.remove_exempt = function(params)
+    params = params or {}
+    if type(params.id) ~= 'string' or params.id == '' then
+        return { code = -1, msg = 'id required' }
+    end
+
+    local c = uci.cursor()
+    c:delete('rssiguard', params.id)
+    c:commit('rssiguard')
+    c:close()
+    os.execute('/etc/init.d/gl_rssiguard reload >/dev/null 2>&1')
+    return { code = 0 }
+end
+
+-- Drop every temporary ban now, without waiting for ban_time to run out.
+M.clear_bans = function()
+    os.execute('/usr/bin/lua /usr/bin/gl_rssiguard clear >/dev/null 2>&1')
+    return { code = 0 }
+end
+
+return M

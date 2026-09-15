@@ -1,0 +1,1488 @@
+#!/usr/bin/lua
+--
+-- gl_cellguard -- keep the modem off blacklisted cells, and on the best
+-- allowed one.
+--
+-- The modem has no "avoid this cell" primitive. AT+QNWLOCK only pins the
+-- radio TO a cell, so exclusion has to be built on top: read where we are,
+-- read what else is in range, and pin to the best allowed candidate whenever
+-- the current cell is blacklisted or clearly worse.
+--
+-- Both reads are local queries -- AT+QENG="servingcell" and
+-- AT+QENG="neighbourcell". Neither starts a network scan, so polling every
+-- 5 seconds is cheap. Acting is not: a lock change makes the modem
+-- re-register and the data connection drops for a few seconds. So the poll
+-- runs at `interval` while switches are rate limited by `dwell`, and a
+-- voluntary switch also has to clear `min_gain`. Escaping a blacklisted cell
+-- ignores min_gain and, on the first offence, ignores dwell too.
+--
+-- Throughput cannot be measured on a cell we are not attached to, so the score
+-- is a proxy: rsrp + sinr_weight*sinr, plus nr_bonus for 5G, plus bw_weight
+-- times the channel width in MHz.
+--
+-- Width is the part that actually separates a fast cell from a loud one, and
+-- the modem only reports it for the cell it is camped on -- neighbour reports
+-- carry pci, earfcn and signal, nothing about the carrier. So width is learned:
+-- every tick records the serving cell's width (and its aggregate width across
+-- carriers, from +QCAINFO) into a cache keyed by rat/pci/earfcn, and a
+-- neighbour we have visited before is scored with the width we measured then.
+-- A cell never visited scores on signal alone and is marked bw_known=false.
+--
+-- Field positions in +QENG output vary between Quectel firmware builds. The
+-- parsers below are table driven and every unparsed line is logged verbatim;
+-- `gl_cellguard probe` dumps the raw responses so a layout can be confirmed
+-- against the modem actually fitted.
+
+local cjson = require 'cjson'
+
+local STATE_PATH = '/tmp/gl_cellguard.json'
+local BW_CACHE_PATH = '/etc/gl_cellguard_bw.json'
+local LOG_TAG = 'gl_cellguard'
+
+-- Quectel reports channel width as an index, not MHz. These are the standard
+-- mappings; `gl_cellguard probe` prints the raw value so they can be checked.
+local LTE_BW_MHZ = { [0] = 1.4, [1] = 3, [2] = 5, [3] = 10, [4] = 15, [5] = 20 }
+local NR_BW_MHZ = {
+    [0] = 5, [1] = 10, [2] = 15, [3] = 20, [4] = 25, [5] = 30, [6] = 40,
+    [7] = 50, [8] = 60, [9] = 70, [10] = 80, [11] = 90, [12] = 100,
+    [13] = 200, [14] = 400
+}
+
+local function bw_to_mhz(rat, index)
+    if index == nil then return nil end
+    if rat == 'LTE' then return LTE_BW_MHZ[index] end
+    return NR_BW_MHZ[index]
+end
+
+-- +QCAINFO does not use the same units as +QENG. Verified against this modem:
+--
+--   +QENG:    "servingcell",...,4,...       DL bandwidth as an index, 4 = 15 MHz
+--   +QCAINFO: "PCC",275,75,"LTE BAND 1",..  the same carrier as 75 resource blocks
+--
+-- So an LTE carrier's width arrives here in resource blocks and has to be
+-- converted, or a 15 MHz carrier scores as though it were 75 MHz.
+--
+-- NR carriers use the same index as +QENG, not MHz -- an earlier version took
+-- the value as MHz on the strength of the manual, but the modem reports
+--
+--   +QCAINFO: "SCC",636672,12,"NR5G BAND 78",302,...
+--
+-- for an n78 carrier, which is 100 MHz (index 12), not a 12 MHz one that
+-- does not exist on that band. Values above the index table are kept as MHz
+-- in case a firmware build does report width directly.
+local RB_TO_MHZ = { [6] = 1.4, [15] = 3, [25] = 5, [50] = 10, [75] = 15, [100] = 20 }
+
+local function carrier_bw_to_mhz(rat, value)
+    if value == nil then return nil end
+    if rat ~= 'LTE' then return NR_BW_MHZ[value] or value end
+    return RB_TO_MHZ[value]
+end
+
+local state = {
+    running = false,
+    -- The SIM slot every reading below belongs to; filled in on each save.
+    slot = nil,
+    serving = nil,
+    candidates = {},
+    locked = nil,
+    last_switch = 0,
+    last_reason = 'not started',
+    last_error = nil,
+    updated = 0
+}
+
+--------------------------------------------------------------------- helpers
+
+local function log(level, msg)
+    os.execute(string.format('logger -t %s -p daemon.%s %q', LOG_TAG, level, msg))
+end
+
+local function shell(cmd)
+    local f = io.popen(cmd .. ' 2>/dev/null')
+    if not f then return '' end
+    local out = f:read('*a') or ''
+    f:close()
+    return out
+end
+
+local function uci_get(key, default)
+    local v = shell('uci -q get ' .. key):gsub('%s+$', '')
+    if v == '' then return default end
+    return v
+end
+
+local function uci_num(key, default)
+    return tonumber(uci_get(key, nil)) or default
+end
+
+local function trim(s)
+    return (s:gsub('^%s+', ''):gsub('%s+$', ''))
+end
+
+local function split(s, sep)
+    local out = {}
+    for field in (s .. sep):gmatch('([^' .. sep .. ']*)' .. sep) do
+        out[#out + 1] = trim(field)
+    end
+    return out
+end
+
+-- +QENG fields are quoted inconsistently and empty fields are common.
+local function unquote(s)
+    return (s or ''):gsub('^"', ''):gsub('"$', '')
+end
+
+local function num(s)
+    if s == nil then return nil end
+    s = unquote(s)
+    if s == '' or s == '-' then return nil end
+    return tonumber(s)
+end
+
+--------------------------------------------------------------------- config
+
+local function load_config()
+    local cfg = {
+        enabled = uci_get('cellguard.global.enabled', '0') == '1',
+        interval = uci_num('cellguard.global.interval', 5),
+        dwell = uci_num('cellguard.global.dwell', 120),
+        min_gain = uci_num('cellguard.global.min_gain', 6),
+        sinr_weight = uci_num('cellguard.global.sinr_weight', 1.5),
+        nr_bonus = uci_num('cellguard.global.nr_bonus', 10),
+        bw_weight = uci_num('cellguard.global.bw_weight', 0.5),
+        escape_dwell = uci_num('cellguard.global.escape_dwell', 90),
+        max_attempts = uci_num('cellguard.global.max_attempts', 3),
+        verify_after = uci_num('cellguard.global.verify_after', 30),
+        escape_reset = uci_num('cellguard.global.escape_reset', 1800),
+        min_rsrp = uci_num('cellguard.global.min_rsrp', -105),
+        release_rsrp = uci_num('cellguard.global.release_rsrp', -110),
+        unlock_when_no_candidate =
+            uci_get('cellguard.global.unlock_when_no_candidate', '1') == '1',
+        blocks = {}
+    }
+
+    if cfg.interval < 1 then cfg.interval = 1 end
+
+    -- `uci show` prints one line per option: cellguard.@block[0].pci='123'
+    for line in shell('uci -q show cellguard'):gmatch('[^\n]+') do
+        local idx, key, value = line:match("cellguard%.@block%[(%d+)%]%.(%w+)='?([^']*)'?")
+        if idx then
+            idx = tonumber(idx) + 1
+            cfg.blocks[idx] = cfg.blocks[idx] or {}
+            cfg.blocks[idx][key] = value
+        end
+    end
+
+    return cfg
+end
+
+local function normalise_cid(cid)
+    if not cid or cid == '' then return nil end
+    cid = tostring(cid):lower():gsub('^0x', ''):gsub('^0+', '')
+    return cid ~= '' and cid or '0'
+end
+
+local function is_blocked(cfg, cell)
+    for _, block in ipairs(cfg.blocks) do
+        local pci = tonumber(block.pci)
+        local earfcn = tonumber(block.earfcn)
+        local cid = normalise_cid(block.cid)
+
+        -- pci+earfcn identifies a cell in neighbour reports; cid only ever
+        -- comes from the serving cell, so it is matched on its own.
+        if pci and cell.pci == pci then
+            if not earfcn or cell.earfcn == earfcn then
+                return true, block
+            end
+        end
+
+        if cid and cell.cid and normalise_cid(cell.cid) == cid then
+            return true, block
+        end
+    end
+    return false, nil
+end
+
+--------------------------------------------------------------------- modem io
+
+local modem_bus
+
+local function get_bus()
+    if modem_bus then return modem_bus end
+    local out = shell('. /lib/functions/modem.sh >/dev/null 2>&1; get_modem_bus')
+    modem_bus = trim(out)
+    if modem_bus == '' then
+        modem_bus = uci_get('glmodem.global.usbnode', '1-1.2')
+    end
+    return modem_bus
+end
+
+-- Which SIM the command is addressed to.
+--
+-- Both SIMs in this router stay registered, so the modem holds one AT context
+-- per slot and each has its own serving cell. Without -U the answer comes from
+-- whichever context happens to be current, and that alternates between the two
+-- on consecutive calls -- measured flipping on roughly half of a 5 second
+-- poll's ticks. Unpinned, the serving cell, its carriers and every lock could
+-- each land on a different SIM, so "exclude the tower in use" excluded a tower
+-- the router was not using.
+--
+-- The slot changes on failover, so unlike the bus it cannot be resolved once
+-- and kept for the life of the process. A short cache is enough to let one
+-- tick's three queries share a single lookup.
+local slot_cached, slot_read_at
+
+local function active_slot()
+    local now = os.time()
+    if slot_cached and now - slot_read_at < 3 then return slot_cached end
+
+    local out = trim(shell(string.format(
+        '. /lib/functions/modem.sh >/dev/null 2>&1; get_current_sim_slot %s', get_bus())))
+
+    if out:match('^%d+$') then
+        slot_cached, slot_read_at = out, now
+        return out
+    end
+
+    -- Falling back to an unpinned call would reopen the very race this closes,
+    -- so keep addressing the slot that last answered.
+    if slot_cached then
+        slot_read_at = now
+        return slot_cached
+    end
+
+    log('warn', 'cannot resolve the active SIM slot, assuming 1')
+    slot_cached, slot_read_at = '1', now
+    return slot_cached
+end
+
+local function at(command, slot)
+    local cmd = string.format("gl_modem -B %s -U %s AT '%s'",
+        get_bus(), slot or active_slot(), command)
+    return shell(cmd)
+end
+
+-- Both SIM slots, whether or not one is carrying data. A lock belongs to the
+-- subscription it was issued on, so the standby slot's lock cannot be seen or
+-- cleared through the active slot's context and has to be addressed directly.
+local ALL_SLOTS = { '1', '2' }
+
+-- Writes go through exactly the same call as reads.
+--
+-- /lib/functions/modem.sh uses `gl_modem -B <bus> SAT sp '<cmd>'` for this, and
+-- that form is not one this build's gl_modem accepts -- it prints its usage and
+-- returns, so every lock and unlock issued that way was silently a no-op. The
+-- binary documents only `-B <bus> [-U <sub>] AT <cmd>`, which is what the
+-- queries already use and what the modem answers "OK" to.
+local at_set = at
+
+--------------------------------------------------------------------- parsing
+
+-- Serving cell. The shape of the answer depends on the RAT the modem is on:
+--
+--   LTE only, or NR5G-SA, or 3G: one line, "servingcell",<state>,"<RAT>",...
+--
+--   EN-DC (NR5G-NSA): THREE lines. A header carrying only "servingcell",<state>,
+--   then an "LTE",... line for the anchor, then an "NR5G-NSA",... line for the
+--   secondary leg. Measured on this RG650V on 2026-09-15:
+--
+--     +QENG: "servingcell","NOCONN"
+--     +QENG: "LTE","FDD",001,02,4D5E6F,270,1550,3,5,5,19,-75,-12,-43,16,0,-,-
+--     +QENG: "NR5G-NSA",001,02,302,-105,-1,-11,636672,78,12,1
+--
+-- The first version knew only the one-line form, so on 5G every line landed in
+-- the "unparsed" bucket and the daemon saw no serving cell at all -- which its
+-- safety logic reads as "the lock killed service" and undoes 30 seconds later.
+-- Every escape onto a 5G-capable cell was therefore judged a failure.
+--
+-- The LTE line of the three-line form is the one-line layout with its first
+-- two fields ("servingcell",<state>) removed, so both are read through one
+-- table with an offset.
+local function lte_cell(f, off)
+    -- ...,"LTE",duplex,mcc,mnc,cid,pci,earfcn,band,ulbw,dlbw,tac,rsrp,rsrq,
+    -- rssi,sinr,...  (positions relative to the "LTE" field at off+1)
+    return {
+        rat = 'LTE',
+        plmn = unquote(f[off + 3]) .. unquote(f[off + 4]),
+        cid = unquote(f[off + 5]),
+        pci = num(f[off + 6]),
+        earfcn = num(f[off + 7]),
+        band = unquote(f[off + 8]),
+        bw_idx = num(f[off + 10]),
+        bw_mhz = bw_to_mhz('LTE', num(f[off + 10])),
+        rsrp = num(f[off + 12]),
+        rsrq = num(f[off + 13]),
+        sinr = num(f[off + 15]),
+        serving = true
+    }
+end
+
+local function parse_serving(text)
+    local cells = {}
+    local reg_state
+
+    for line in text:gmatch('[^\r\n]+') do
+        if line:match('^%+QENG') then
+            local body = line:match('^%+QENG:%s*(.+)$')
+            if body then
+                local f = split(body, ',')
+                local kind = unquote(f[1])
+                local rat = unquote(f[3])
+
+                if kind == 'servingcell' and rat == 'LTE' then
+                    cells[#cells + 1] = lte_cell(f, 2)
+                elseif kind == 'servingcell' and rat == 'NR5G-SA' then
+                    -- "servingcell",state,"NR5G-SA",duplex,mcc,mnc,cid,pci,
+                    -- tac,arfcn,band,dlbw,rsrp,rsrq,sinr,scs,...
+                    cells[#cells + 1] = {
+                        rat = 'NR5G',
+                        plmn = unquote(f[5]) .. unquote(f[6]),
+                        cid = unquote(f[7]),
+                        pci = num(f[8]),
+                        earfcn = num(f[10]),
+                        band = unquote(f[11]),
+                        bw_idx = num(f[12]),
+                        bw_mhz = bw_to_mhz('NR5G', num(f[12])),
+                        rsrp = num(f[13]),
+                        rsrq = num(f[14]),
+                        sinr = num(f[15]),
+                        scs = num(f[16]),
+                        serving = true
+                    }
+                elseif kind == 'servingcell' and (rat == 'WCDMA' or rat == 'GSM') then
+                    -- "servingcell",state,"WCDMA",mcc,mnc,lac,cid,uarfcn,psc,
+                    -- rac,rscp,ecio,...  A 3G cell is where a 4G lock strands
+                    -- the modem when the locked cell cannot be reached, so it
+                    -- has to be recognised rather than discarded: to the caller
+                    -- it means "the lock failed", not "nothing to report".
+                    cells[#cells + 1] = {
+                        rat = rat,
+                        legacy = true,
+                        plmn = unquote(f[4]) .. unquote(f[5]),
+                        cid = unquote(f[7]),
+                        earfcn = num(f[8]),
+                        pci = num(f[9]),
+                        rsrp = num(f[11]),
+                        serving = true
+                    }
+                elseif kind == 'servingcell' and #f <= 2 then
+                    -- Header of the three-line form; the RAT lines follow.
+                    reg_state = unquote(f[2])
+                elseif kind == 'LTE' then
+                    cells[#cells + 1] = lte_cell(f, 0)
+                elseif kind == 'NR5G-NSA' then
+                    -- "NR5G-NSA",mcc,mnc,pci,rsrp,sinr,rsrq,arfcn,band,dlbw,scs
+                    -- No cell id: the NSA leg is a secondary cell group the
+                    -- anchor eNB adds, not something the modem selects.
+                    cells[#cells + 1] = {
+                        rat = 'NR5G',
+                        nsa = true,
+                        plmn = unquote(f[2]) .. unquote(f[3]),
+                        pci = num(f[4]),
+                        rsrp = num(f[5]),
+                        sinr = num(f[6]),
+                        rsrq = num(f[7]),
+                        earfcn = num(f[8]),
+                        band = unquote(f[9]),
+                        bw_idx = num(f[10]),
+                        bw_mhz = bw_to_mhz('NR5G', num(f[10])),
+                        scs = num(f[11]),
+                        serving = true
+                    }
+                else
+                    log('debug', 'unparsed servingcell line: ' .. line)
+                end
+            end
+        end
+    end
+
+    return cells, reg_state
+end
+
+-- Neighbour cells. These never carry a full cell ID -- pci plus earfcn is all
+-- the modem reports, which is why the blacklist keys on that pair.
+local function parse_neighbours(text)
+    local cells = {}
+
+    for line in text:gmatch('[^\r\n]+') do
+        local body = line:match('^%+QENG:%s*(.+)$')
+        if body then
+            local f = split(body, ',')
+            local kind = unquote(f[1])
+
+            if kind:match('^neighbourcell') then
+                local rat = unquote(f[2])
+
+                if rat == 'LTE' then
+                    -- "neighbourcell intra","LTE",earfcn,pci,rsrq,rsrp,rssi,sinr,...
+                    cells[#cells + 1] = {
+                        rat = 'LTE',
+                        earfcn = num(f[3]),
+                        pci = num(f[4]),
+                        rsrq = num(f[5]),
+                        rsrp = num(f[6]),
+                        sinr = num(f[8])
+                    }
+                elseif rat:match('^NR5G') then
+                    -- "neighbourcell","NR5G",arfcn,pci,rsrp,rsrq,sinr
+                    cells[#cells + 1] = {
+                        rat = 'NR5G',
+                        earfcn = num(f[3]),
+                        pci = num(f[4]),
+                        rsrp = num(f[5]),
+                        rsrq = num(f[6]),
+                        sinr = num(f[7])
+                    }
+                elseif rat == 'WCDMA' or rat == 'GSM' then
+                    -- 3G and 2G neighbours cannot be locked to and are not
+                    -- what the blacklist keys on. Dropped without a word:
+                    -- while the modem sits on WCDMA it reports several of
+                    -- these per poll, which buried the log.
+                    _ = rat
+                else
+                    log('debug', 'unparsed neighbourcell line: ' .. line)
+                end
+            end
+        end
+    end
+
+    return cells
+end
+
+------------------------------------------------------------ carrier width
+
+-- +QCAINFO lists the primary carrier and every secondary one, each with its
+-- own width. Their sum is what the connection can actually use, so it is a
+-- better throughput proxy than the primary carrier alone.
+local function parse_qcainfo(text)
+    local carriers = {}
+    local total = 0
+
+    for line in text:gmatch('[^\r\n]+') do
+        local body = line:match('^%+QCAINFO:%s*(.+)$')
+        if body then
+            local f = split(body, ',')
+            local role = unquote(f[1])           -- PCC or SCC
+            local freq = num(f[2])
+            local width = num(f[3])
+            local band = unquote(f[4])
+            local rat = band:match('^NR') and 'NR5G' or 'LTE'
+            local mhz = carrier_bw_to_mhz(rat, width)
+
+            if mhz then
+                total = total + mhz
+                carriers[#carriers + 1] = {
+                    role = role, freq = freq, band = band, mhz = mhz
+                }
+            else
+                log('debug', 'unparsed QCAINFO line: ' .. line)
+            end
+        end
+    end
+
+    return carriers, (total > 0 and total or nil)
+end
+
+-- Escaping a blacklisted cell is rationed: at most `max_attempts` locks, each
+-- separated by `escape_dwell`, each judged `verify_after` seconds later. When
+-- the budget runs out the lock is released and the daemon stops trying, rather
+-- than re-locking every poll and making the connection unusable.
+--
+-- Every lock issued counts, whether or not it lands: a lock that lands and is
+-- later let go (signal faded, modem fell to 3G) costs a reconnection just the
+-- same. `failed` remembers targets that did not deliver, so the next attempt
+-- tries somebody else instead of the same cell again. The budget decays after
+-- `escape_reset` seconds rather than resetting whenever the serving cell
+-- changes -- a modem bouncing between the blocked cell and a neighbour changes
+-- serving cell many times an hour, and a reset on each made "three attempts"
+-- mean three per bounce.
+local escape = { cell = nil, attempts = 0, gave_up = false, last_try = 0, pending = 0, failed = {} }
+
+local function escape_key(cell)
+    return string.format('%s/%s/%s', cell.rat or '?', tostring(cell.pci), tostring(cell.earfcn))
+end
+
+local function reset_escape()
+    escape = { cell = nil, attempts = 0, gave_up = false, last_try = 0, pending = 0, failed = {} }
+end
+
+local bw_cache = nil
+
+-- The cache is keyed by operator as well as cell. This router carries two
+-- SIMs on two operators, and the neighbour list the modem reports is not
+-- filtered by operator, so a cell learned while the other SIM was active shows
+-- up as a bright, "known" neighbour while the other SIM is carrying data.
+-- Measured: the standby SIM's cell was the top candidate at -53 dBm with a
+-- known width of 75 MHz, scoring 10 points above the serving cell. Locking
+-- the active SIM to another operator's cell can only end in no service,
+-- then 3G.
+local function cache_key(cell, plmn)
+    return string.format('%s/%s/%s/%s', plmn or cell.plmn or '?',
+        cell.rat or '?', tostring(cell.pci), tostring(cell.earfcn))
+end
+
+local function load_bw_cache()
+    if bw_cache then return bw_cache end
+    bw_cache = {}
+    local f = io.open(BW_CACHE_PATH)
+    if f then
+        local raw = f:read('*a')
+        f:close()
+        local ok, decoded = pcall(cjson.decode, raw)
+        if ok and type(decoded) == 'table' then
+            -- Entries from before the key carried an operator cannot be told
+            -- apart by SIM, so they are dropped and relearned.
+            for key, entry in pairs(decoded) do
+                if select(2, key:gsub('/', '')) == 3 then bw_cache[key] = entry end
+            end
+        end
+    end
+    return bw_cache
+end
+
+local function save_bw_cache()
+    if not bw_cache then return end
+    local f = io.open(BW_CACHE_PATH .. '.tmp', 'w')
+    if not f then return end
+    f:write(cjson.encode(bw_cache))
+    f:close()
+    os.rename(BW_CACHE_PATH .. '.tmp', BW_CACHE_PATH)
+end
+
+-- Record what we can see now, so this cell can be scored on width next time
+-- it shows up as a neighbour.
+local function learn_bw(cell, aggregate)
+    -- earfcn -1 has been seen while the modem was mid-reselection; a key built
+    -- from it can never match a neighbour report, so it is only cache litter.
+    if not (cell and cell.pci and cell.earfcn and cell.earfcn > 0 and cell.plmn) then return end
+    local width = aggregate or cell.bw_mhz
+    if not width then return end
+
+    local cache = load_bw_cache()
+    local key = cache_key(cell)
+    local prev = cache[key]
+
+    if not prev or prev.mhz ~= width or prev.carrier_mhz ~= cell.bw_mhz then
+        cache[key] = {
+            mhz = width,
+            carrier_mhz = cell.bw_mhz,
+            band = cell.band,
+            seen = os.time()
+        }
+        save_bw_cache()
+    else
+        prev.seen = os.time()
+    end
+end
+
+-- Width for a cell we are not attached to, if we have met it before on the
+-- operator the modem is currently registered with. "Known" therefore also
+-- means "this SIM has camped there", which is the only evidence available
+-- that a neighbour belongs to our network at all.
+local function recall_bw(cell, plmn)
+    local entry = load_bw_cache()[cache_key(cell, plmn)]
+    if not entry then return nil, false end
+    return entry.mhz, true
+end
+
+--------------------------------------------------------------------- scoring
+
+local function score(cfg, cell)
+    if not cell.rsrp then return nil end
+    local s = cell.rsrp
+    if cell.sinr then s = s + cfg.sinr_weight * cell.sinr end
+    -- An LTE anchor with an NSA leg attached is carrying 5G data too.
+    if cell.rat == 'NR5G' or cell.nr then s = s + cfg.nr_bonus end
+    if cell.bw_mhz then s = s + cfg.bw_weight * cell.bw_mhz end
+    return s
+end
+
+local function label(cell)
+    local width = cell.bw_mhz and string.format(' %sMHz%s', cell.bw_mhz, cell.bw_known == false and '?' or '') or ''
+    return string.format('%s%s pci=%s earfcn=%s%s',
+        cell.rat, cell.nr and '+NR' or '', tostring(cell.pci), tostring(cell.earfcn), width)
+end
+
+local function same_cell(a, b)
+    return a and b and a.pci == b.pci and a.earfcn == b.earfcn
+end
+
+--------------------------------------------------------------------- locking
+
+-- Every lock makes the modem re-register, which drops the data connection for
+-- a few seconds -- confirmed on this device: a lock/unlock pair produced a
+-- full backhaul teardown and rebuild in the system log. So a lock is an
+-- expensive action, not a free nudge, and the caller rations them.
+--
+-- The 4G lock takes a list: AT+QNWLOCK=? on this RG650V answers
+-- "common/4g",(0-10),<freq>,<pci>, so up to ten cells can be allowed at once
+-- and the modem hands over among them as it would unlocked. A lock to a
+-- single cell forbids every handover, and a router that moves rides that cell
+-- down to nothing and then falls to 3G. So `cell` is the cell we mean to land
+-- on and `group` the other allowed cells to keep reachable, tried first as
+-- one list and, should the firmware refuse the list form, as the single cell.
+local MAX_LOCK_CELLS = 10
+
+local function lock(cell, group)
+    local reply
+    if cell.rat == 'NR5G' then
+        if not (cell.pci and cell.earfcn) then return false, 'missing pci/arfcn' end
+        local scs = cell.scs or 30
+        local band = tostring(cell.band or ''):gsub('%D', '')
+        if band == '' then return false, 'unknown NR band, cannot lock' end
+        reply = at_set(string.format('AT+QNWLOCK="common/5g",%d,%d,%d,%s',
+            cell.pci, cell.earfcn, scs, band))
+    else
+        if not (cell.pci and cell.earfcn) then return false, 'missing pci/earfcn' end
+
+        local list = { string.format('%d,%d', cell.earfcn, cell.pci) }
+        for _, other in ipairs(group or {}) do
+            if #list >= MAX_LOCK_CELLS then break end
+            if other.rat ~= 'NR5G' and other.pci and other.earfcn
+                and not (other.pci == cell.pci and other.earfcn == cell.earfcn) then
+                list[#list + 1] = string.format('%d,%d', other.earfcn, other.pci)
+            end
+        end
+
+        if #list > 1 then
+            reply = at_set(string.format('AT+QNWLOCK="common/4g",%d,%s', #list, table.concat(list, ',')))
+            if reply and reply:find('OK') then
+                cell.group_size = #list
+                return true, nil
+            end
+            log('warn', 'the modem refused a multi-cell lock, falling back to one cell: ' ..
+                ((reply or ''):gsub('%s+', ' '):sub(1, 80)))
+        end
+        reply = at_set(string.format('AT+QNWLOCK="common/4g",1,%d,%d', cell.earfcn, cell.pci))
+        cell.group_size = 1
+    end
+
+    -- The modem answers OK or ERROR. Anything else means the command never
+    -- reached it, which is how the first version failed silently.
+    if not reply or not reply:find('OK') then
+        return false, 'the modem did not accept the lock: ' ..
+            ((reply or ''):gsub('%s+', ' '):sub(1, 80))
+    end
+    return true, nil
+end
+
+-- What the modem says it is locked to on a slot, or nil. For a list lock this
+-- is the first cell of the list, with the list length in `group_size`.
+local function read_lock(slot)
+    local four = at('AT+QNWLOCK="common/4g"', slot)
+    local count, earfcn, pci = four:match('"common/4g",(%d+),(%d+),(%d+)')
+    if count and tonumber(count) > 0 then
+        return { rat = 'LTE', earfcn = tonumber(earfcn), pci = tonumber(pci), group_size = tonumber(count) }
+    end
+    local five = at('AT+QNWLOCK="common/5g"', slot)
+    local pci5, arfcn5 = five:match('"common/5g",(%d+),(%d+)')
+    if pci5 then return { rat = 'NR5G', pci = tonumber(pci5), earfcn = tonumber(arfcn5) } end
+    return nil
+end
+
+local function unlock(slot)
+    at_set('AT+QNWLOCK="common/4g",0', slot)
+    at_set('AT+QNWLOCK="common/5g",0', slot)
+end
+
+-- Unlock only if the modem says it is locked. For the paths that cannot know
+-- whether a lock exists -- service stop, a daemon that has just started --
+-- so that a modem with nothing to release is not made to re-register for
+-- nothing.
+local function release_if_locked(slot)
+    local held = read_lock(slot)
+    if not held then return nil end
+    unlock(slot)
+    return held
+end
+
+-- Locks on the slot that is not carrying data.
+--
+-- QNWLOCK is per subscription. This router keeps both SIMs registered and
+-- fails over between them, and cellguard only ever locks the slot carrying
+-- data -- so a lock on the other slot is always left over from when that slot
+-- was the active one. It is invisible from the active slot's context, and
+-- nothing is watching it, but it comes back into force the moment a failover
+-- makes that slot active again: the modem is pinned to a cell it may no
+-- longer be able to reach, and drops to 3G.
+--
+-- Measured: a lock sat on slot 1 while slot 2 carried data; a restart looked
+-- at the active slot only, saw no lock, and adopted nothing. A failover to
+-- slot 1 two hours later left the modem on WCDMA for as long as it stayed
+-- there.
+local function sweep_standby_locks()
+    local active = active_slot()
+    for _, slot in ipairs(ALL_SLOTS) do
+        if slot ~= active then
+            local held = release_if_locked(slot)
+            if held then
+                log('warn', string.format(
+                    'released a lock on standby SIM %s (%s); it was not carrying data and nothing was watching it',
+                    slot, label(held)))
+            end
+        end
+    end
+end
+
+--------------------------------------------------------------------- state io
+
+local function save_state()
+    state.updated = os.time()
+    -- Which SIM everything above describes. The cellular page is per-slot, so
+    -- its "exclude the tower in use" button has to be able to tell whether the
+    -- slot being viewed is the one these readings come from.
+    state.slot = tonumber(active_slot())
+    local f = io.open(STATE_PATH .. '.tmp', 'w')
+    if not f then return end
+    f:write(cjson.encode(state))
+    f:close()
+    os.rename(STATE_PATH .. '.tmp', STATE_PATH)
+end
+
+--------------------------------------------------------------------- the loop
+
+local function uptime()
+    local f = io.open('/proc/uptime')
+    if not f then return os.time() end
+    local v = tonumber((f:read('*l') or '0'):match('^%S+')) or 0
+    f:close()
+    return v
+end
+
+-- `enforce` false means read and report but never touch the radio -- with one
+-- exception: a lock the daemon itself left behind is always released, because
+-- a modem pinned to a cell nobody is watching is how the 3G strandings came
+-- about.
+--
+-- The serving cell has to be known before the feature is switched on: it is
+-- what "exclude the tower in use" acts on, and what a blacklist is built from.
+-- Reporting nothing until enabled made that button fail silently.
+
+-- Seconds to let a fresh lock settle before a 3G camp counts as its failure.
+-- Re-registration takes a few seconds; a modem still on 3G three polls later
+-- is not going to find the locked cell.
+local LEGACY_GRACE = 15
+
+-- Consecutive polls below release_rsrp before a held lock is let go.
+local WEAK_POLLS = 2
+local weak_polls = 0
+
+-- How often to ask the modem whether it is locked while nothing is on record.
+-- Two AT calls a minute against a five second poll.
+local LOCK_PROBE_INTERVAL = 60
+local last_lock_probe = 0
+
+-- Release a held lock and say why. `last_switch` restarts the dwell clock so
+-- the next voluntary move is at least `dwell` away from this one.
+local function drop_lock(reason, level)
+    unlock()
+    state.locked = nil
+    state.lock_from = nil
+    state.adopted = nil
+    state.last_switch = uptime()
+    weak_polls = 0
+    state.last_reason = reason
+    log(level or 'notice', reason)
+end
+
+-- A lock this run did not issue, found on the modem while the connection is in
+-- trouble: left by a previous run, or -- the case that took two hours to show
+-- itself on 2026-09-15 -- issued on this slot long ago, hidden for as long as
+-- the other SIM carried data, and back in force after a failover.
+--
+-- Taking ownership of it is what makes it releasable: every rule below acts on
+-- `state.locked`, so a lock nobody recorded was one nothing could undo. The
+-- modem is only asked about this when a stranding is already visible, so the
+-- normal path still costs no extra AT calls.
+local function adopt_stray_lock(why)
+    local held = read_lock()
+    if not held then return false end
+    state.locked = held
+    state.lock_from = nil
+    state.adopted = true
+    state.last_switch = uptime()
+    weak_polls = 0
+    log('warn', string.format('%s a lock on %s that this run did not set; adopting it so it can be released',
+        why, label(held)))
+    return true
+end
+
+-- The lock did not deliver a usable cell. Mark the target so it is not tried
+-- again this round, decide whether the round is over, and let the modem go.
+local function judge_failed_lock(cfg, what)
+    if escape.pending > 0 then
+        escape.pending = 0
+        if state.locked then escape.failed[escape_key(state.locked)] = true end
+        escape.gave_up = escape.attempts >= cfg.max_attempts
+        drop_lock(string.format('attempt %d of %d %s; released the lock%s',
+            escape.attempts, cfg.max_attempts, what,
+            escape.gave_up and ' and stopped trying' or ''), 'err')
+    else
+        drop_lock('the lock ' .. what .. '; released it', 'err')
+    end
+end
+
+local function escape_report(cfg)
+    if not escape.cell then return nil end
+    return {
+        attempts = escape.attempts,
+        max_attempts = cfg.max_attempts,
+        gave_up = escape.gave_up
+    }
+end
+
+local function tick(cfg, enforce)
+    local serving_cells, reg_state = parse_serving(at('AT+QENG="servingcell"'))
+    local neighbours = parse_neighbours(at('AT+QENG="neighbourcell"'))
+
+    -- Where we are. In EN-DC the LTE anchor is what the modem selected and
+    -- what a lock can act on; the NSA leg is added by the anchor's eNB, so it
+    -- rides along on the anchor instead of standing in for it. NR5G-SA is a
+    -- serving cell in its own right.
+    local serving, nr_leg
+    for _, c in ipairs(serving_cells) do
+        if c.nsa then
+            nr_leg = c
+        elseif not serving or (serving.legacy and not c.legacy) then
+            serving = c
+        end
+    end
+    if serving and nr_leg and not serving.legacy then
+        serving.nr = nr_leg
+    elseif nr_leg and not serving then
+        serving = nr_leg
+    end
+
+    state.reg_state = reg_state
+    state.enforcing = enforce and true or false
+
+    -- A failover changes which subscription every AT call addresses, and the
+    -- slot left behind keeps whatever lock it was carrying. Clear it now, so
+    -- it cannot strand the modem the next time failover goes the other way.
+    local slot_now = active_slot()
+    if state.slot and tostring(state.slot) ~= slot_now then
+        log('notice', string.format('the active SIM changed from %s to %s', tostring(state.slot), slot_now))
+        reset_escape()
+        state.escape = nil
+        state.locked = nil
+        state.lock_from = nil
+        state.adopted = nil
+        if enforce then sweep_standby_locks() end
+    end
+
+    -- A lock this run did not set can also sit on a cell that is working
+    -- perfectly, where nothing appears wrong until that cell fades or the
+    -- router moves -- and then the modem, unable to hand over, drops to 3G.
+    -- The checks below only fire once that damage is done, so the modem is
+    -- asked directly, once a minute, whenever no lock is on record. What turns
+    -- up is adopted and then released by the rules further down, before it can
+    -- cost anything.
+    if enforce and not state.locked and uptime() - last_lock_probe >= LOCK_PROBE_INTERVAL then
+        last_lock_probe = uptime()
+        adopt_stray_lock('a routine check found')
+    end
+
+    if not serving then
+        state.serving = nil
+        state.candidates = {}
+
+        if enforce and not state.locked and adopt_stray_lock('no serving cell, and') then
+            state.last_reason = 'no serving cell; releasing a lock this run did not set'
+            return
+        end
+
+        -- A lock can cost the modem its registration outright, and then there
+        -- is no serving cell to report at all. Everything that judges an
+        -- outstanding attempt and releases the lock lives below this point, so
+        -- returning here left the modem locked to a cell it could not use, with
+        -- nothing left able to undo it -- an outage that lasts until someone
+        -- unlocks by hand. Measured on this device: a lock to a -104 dBm
+        -- neighbour, then fifteen straight polls of "no serving cell reported"
+        -- with the lock still on. Judge it here instead, on the same settle
+        -- clock and out of the same attempt budget.
+        if state.locked then
+            local waited = uptime() - state.last_switch
+            if waited < cfg.verify_after then
+                state.last_reason = string.format(
+                    'no service since the lock; releasing it in %ds',
+                    math.floor(cfg.verify_after - waited))
+                return
+            end
+            judge_failed_lock(cfg, 'left the modem with no service')
+            return
+        end
+
+        state.last_reason = reg_state == 'SEARCH'
+            and 'no serving cell (the modem is searching)'
+            or 'no serving cell reported'
+        return
+    end
+
+    -- On 3G. A 4G lock only narrows which LTE cell the modem may use; when
+    -- that cell cannot be reached the modem does not pick another LTE cell, it
+    -- drops to WCDMA and stays there for as long as the lock stands. So a 3G
+    -- camp shortly after a lock is the lock failing, and the answer is to let
+    -- go now rather than wait out verify_after in the dark.
+    if serving.legacy then
+        state.serving = serving
+        state.candidates = {}
+
+        -- 3G with no lock on record is the shape of a lock nobody is tracking:
+        -- the modem cannot reach the cell it is pinned to, so it sits on
+        -- WCDMA, and the daemon has nothing to release. Ask the modem.
+        if enforce and not state.locked then
+            adopt_stray_lock('on ' .. serving.rat .. ', and found')
+        end
+
+        if state.locked then
+            local waited = uptime() - state.last_switch
+            if waited < LEGACY_GRACE then
+                state.last_reason = string.format('on %s since the lock; judging it in %ds',
+                    serving.rat, math.floor(LEGACY_GRACE - waited))
+                return
+            end
+            judge_failed_lock(cfg, 'left the modem on ' .. serving.rat)
+            return
+        end
+
+        state.last_reason = string.format('on %s (cell %s); nothing to act on until LTE or NR returns',
+            serving.rat, tostring(serving.cid))
+        return
+    end
+
+    -- Aggregate width across every active carrier, and remember it for this
+    -- cell so the same tower can be scored on width when it is only a
+    -- neighbour later.
+    local carriers, aggregate = parse_qcainfo(at('AT+QCAINFO'))
+    serving.carriers = carriers
+    serving.aggregate_mhz = aggregate
+    if aggregate then serving.bw_mhz = aggregate end
+    serving.bw_known = serving.bw_mhz ~= nil
+    learn_bw(serving, aggregate)
+
+    local blocked_now, matched = is_blocked(cfg, serving)
+    serving.blocked = blocked_now
+    serving.score = score(cfg, serving)
+    state.serving = serving
+
+    local candidates = {}
+    for _, c in ipairs(neighbours) do
+        -- Neighbour reports carry no width. Use what we measured last time we
+        -- were on this cell, if we ever were.
+        local width, known = recall_bw(c, serving.plmn)
+        c.bw_mhz = width
+        c.bw_known = known
+        c.blocked = is_blocked(cfg, c)
+        c.score = score(cfg, c)
+        -- The serving cell lists itself among the intra-frequency neighbours.
+        -- Locking to where we already are is a reconnection for nothing.
+        c.self = same_cell(c, serving)
+        -- Below min_rsrp a lock lands on a cell the modem cannot hold. The
+        -- -104 dBm neighbour of 2026-09-14 gave fifteen polls of no service.
+        c.weak = c.rsrp ~= nil and c.rsrp < cfg.min_rsrp
+        if not c.blocked and not c.self and not c.weak and c.score then
+            candidates[#candidates + 1] = c
+        end
+    end
+    table.sort(candidates, function(a, b) return a.score > b.score end)
+    state.candidates = candidates
+
+    local now = uptime()
+    local since_switch = now - state.last_switch
+
+    if not enforce then
+        if state.locked then
+            drop_lock('enforcement is off; released the lock on ' .. label(state.locked))
+            return
+        end
+        state.last_reason = blocked_now
+            and ('watching only; the current cell is on the blacklist (' .. label(serving) .. ')')
+            or ('watching only; on ' .. label(serving))
+        return
+    end
+
+    -- Budget decay. See the note on `escape`.
+    if escape.cell and escape.last_try > 0 and now - escape.last_try > cfg.escape_reset then
+        reset_escape()
+    end
+
+    if blocked_now then
+        local key = escape_key(serving)
+        if escape.cell ~= key then
+            reset_escape()
+            escape.cell = key
+        end
+        state.escape = escape_report(cfg)
+
+        if escape.gave_up then
+            state.last_reason = string.format(
+                'still on blocked %s; gave up after %d attempts, trying again in %dm',
+                label(serving), escape.attempts,
+                math.max(0, math.floor((cfg.escape_reset - (now - escape.last_try)) / 60)))
+            return
+        end
+
+        -- An attempt is outstanding. Give the modem time to act on it before
+        -- judging, otherwise every poll counts the same lock as another
+        -- failure.
+        if escape.pending > 0 then
+            local waited = now - escape.pending
+            if waited < cfg.verify_after then
+                state.last_reason = string.format(
+                    'locked to leave %s; %ds until that is judged',
+                    label(serving), math.floor(cfg.verify_after - waited))
+                return
+            end
+
+            -- Still on a blocked cell after the settle time: it did not work.
+            escape.pending = 0
+            if state.locked then escape.failed[escape_key(state.locked)] = true end
+
+            local held = read_lock()
+            log('warn', string.format('attempt %d did not move off %s (modem reports lock: %s)',
+                escape.attempts, label(serving), held and label(held) or 'none'))
+
+            if escape.attempts >= cfg.max_attempts then
+                escape.gave_up = true
+                state.escape = escape_report(cfg)
+                drop_lock(string.format(
+                    'could not leave blocked %s after %d attempts; released the lock and stopped trying',
+                    label(serving), escape.attempts), 'err')
+                return
+            end
+        end
+
+        -- Back here with the budget spent by locks that landed but did not
+        -- last (signal faded, 3G): leave the modem alone until the budget
+        -- decays rather than reconnecting again and again.
+        if escape.attempts >= cfg.max_attempts then
+            escape.gave_up = true
+            state.escape = escape_report(cfg)
+            local reason = string.format('back on blocked %s after %d escapes; leaving the modem alone for now',
+                label(serving), escape.attempts)
+            if state.locked then drop_lock(reason, 'warn') else
+                state.last_reason = reason
+                log('warn', reason)
+            end
+            return
+        end
+
+        -- Each attempt costs a reconnection, so they are spaced out.
+        local since_try = now - escape.last_try
+        if escape.last_try > 0 and since_try < cfg.escape_dwell then
+            state.last_reason = string.format('on blocked %s; next attempt in %ds',
+                label(serving), math.floor(cfg.escape_dwell - since_try))
+            return
+        end
+
+        -- Cells this SIM has camped on before are the only ones known to be
+        -- on its network -- the neighbour list is not filtered by operator,
+        -- and the other SIM's strongest cell is usually in it -- so they go
+        -- first. Unknown cells are tried only when nothing known is in range.
+        -- Whatever has already failed this round is skipped.
+        local target, group = nil, {}
+        for pass = 1, 2 do
+            for _, c in ipairs(candidates) do
+                local known = c.bw_known and true or false
+                if known == (pass == 1) and not escape.failed[escape_key(c)] then
+                    if not target then target = c else group[#group + 1] = c end
+                end
+            end
+            -- The list lock keeps only cells of the same standing as the
+            -- target: a known target is not padded with unknown cells.
+            if target then break end
+        end
+
+        if not target then
+            if cfg.unlock_when_no_candidate and state.locked then
+                drop_lock('on a blocked cell with no allowed neighbour; released the lock', 'warn')
+            else
+                state.last_reason = 'on a blocked cell (' ..
+                    (matched and matched.note or label(serving)) .. ') but no allowed neighbour is visible'
+            end
+            return
+        end
+
+        local ok, err = lock(target, group)
+        escape.last_try = now
+        escape.attempts = escape.attempts + 1
+        state.escape = escape_report(cfg)
+
+        if ok then
+            escape.pending = now
+            state.locked = target
+            state.lock_from = { rat = serving.rat, pci = serving.pci, earfcn = serving.earfcn, cid = serving.cid }
+            state.adopted = nil
+            state.last_switch = now
+            weak_polls = 0
+            state.last_reason = string.format('attempt %d of %d: locking to %s to leave %s',
+                escape.attempts, cfg.max_attempts, label(target), label(serving))
+            log('notice', state.last_reason)
+        else
+            escape.failed[escape_key(target)] = true
+            state.last_error = tostring(err)
+            state.last_reason = 'lock refused: ' .. tostring(err)
+            log('err', state.last_reason)
+            if escape.attempts >= cfg.max_attempts then
+                escape.gave_up = true
+                state.escape = escape_report(cfg)
+                log('err', 'giving up on leaving ' .. label(serving))
+            end
+        end
+        return
+    end
+
+    -- Not on a blocked cell.
+    if escape.pending > 0 then
+        escape.pending = 0
+        log('notice', string.format('attempt %d landed on %s', escape.attempts, label(serving)))
+    end
+    state.escape = escape_report(cfg)
+
+    if state.locked then
+        -- A pinned modem cannot hand over, so a held lock has to be let go
+        -- before the cell is gone entirely -- once it is gone the modem
+        -- falls to 3G and stays there until unlocked.
+        if serving.rsrp and serving.rsrp < cfg.release_rsrp then
+            weak_polls = weak_polls + 1
+            if weak_polls >= WEAK_POLLS then
+                drop_lock(string.format('%s fell to %d dBm; released the lock so the modem can hand over',
+                    label(serving), serving.rsrp), 'warn')
+                return
+            end
+        else
+            weak_polls = 0
+        end
+
+        -- A lock inherited from a previous run: nobody knows what it was for,
+        -- and the modem is on an allowed cell, so it is not needed. If a
+        -- blacklisted cell is what it was escaping, the escape logic takes
+        -- over the moment the modem returns there.
+        if state.adopted then
+            drop_lock('released a lock inherited from a previous run; on ' .. label(serving))
+            return
+        end
+
+        -- The cell the lock was escaping is no longer blacklisted, so the
+        -- reason for the pin is gone.
+        if state.lock_from and not is_blocked(cfg, state.lock_from) then
+            drop_lock('the excluded cell is no longer on the blacklist; released the lock')
+            return
+        end
+    end
+
+    -- Not blocked: only move for a clear win, not more often than dwell, and
+    -- only to a cell this router has camped on before -- that is the only
+    -- evidence that a neighbour is on our network at all (neighbour reports
+    -- are not filtered by operator) and the only way its width is known.
+    if since_switch < cfg.dwell then
+        state.last_reason = string.format('holding %s (%ds of %ds dwell remaining)',
+            label(serving), math.floor(cfg.dwell - since_switch), cfg.dwell)
+        return
+    end
+
+    local target
+    for _, c in ipairs(candidates) do
+        if c.bw_known then
+            target = c
+            break
+        end
+    end
+
+    if not target or not serving.score then
+        state.last_reason = 'holding ' .. label(serving) .. ' (no known alternative)'
+        return
+    end
+
+    local gain = target.score - serving.score
+    if gain < cfg.min_gain then
+        state.last_reason = string.format('holding %s (best known alternative is only %+.1f)',
+            label(serving), gain)
+        return
+    end
+
+    local ok, err = lock(target)
+    if ok then
+        state.locked = target
+        state.adopted = nil
+        state.last_switch = now
+        weak_polls = 0
+        state.last_reason = string.format('switched to %s (%+.1f better than %s)',
+            label(target), gain, label(serving))
+        log('notice', state.last_reason)
+    else
+        state.last_error = 'lock failed: ' .. tostring(err)
+        state.last_reason = state.last_error
+        log('err', state.last_error)
+    end
+end
+
+--------------------------------------------------------------------- entry
+
+local function run()
+    log('notice', 'started')
+    state.running = true
+
+    -- A lock outlives the process that set it. The previous version kept its
+    -- only record of a lock in memory, so after a restart it polled "no
+    -- serving cell" for minutes while the modem sat on 3G under a lock it
+    -- could not see, with an empty blacklist. Adopt whatever the modem reports
+    -- so the usual release rules apply to it from the first tick.
+    local held = read_lock()
+    if held then
+        state.locked = held
+        state.adopted = true
+        state.last_switch = uptime()
+        log('warn', 'the modem is already locked to ' .. label(held) .. '; adopting it')
+    end
+
+    -- The active slot's lock is adopted above so the usual rules can judge it.
+    -- The other slot's is simply let go: nothing will be watching it, and it
+    -- only waits for the next failover to strand the modem.
+    sweep_standby_locks()
+
+    while true do
+        local cfg = load_config()
+
+        -- Read either way. Only act when switched on.
+        local ok, err = pcall(tick, cfg, cfg.enabled)
+        if not ok then
+            state.last_error = tostring(err)
+            log('err', 'tick failed: ' .. tostring(err))
+        else
+            state.last_error = nil
+        end
+
+        save_state()
+        os.execute('sleep ' .. cfg.interval)
+    end
+end
+
+local function probe()
+    -- Dump what the modem actually answers, so field positions can be checked
+    -- against this specific firmware build before trusting the parser.
+    print('modem bus: ' .. get_bus())
+    print('\n--- AT+QENG="servingcell" ---')
+    print(at('AT+QENG="servingcell"'))
+    print('--- AT+QENG="neighbourcell" ---')
+    print(at('AT+QENG="neighbourcell"'))
+    print('--- AT+QCAINFO ---')
+    print(at('AT+QCAINFO'))
+    -- Per slot: a lock belongs to one subscription, and the one that matters
+    -- is often the slot that is NOT carrying data right now.
+    print('active SIM slot: ' .. active_slot())
+    for _, slot in ipairs(ALL_SLOTS) do
+        print(string.format('--- SIM %s: AT+QNWLOCK ---', slot))
+        print(at('AT+QNWLOCK="common/4g"', slot))
+        print(at('AT+QNWLOCK="common/5g"', slot))
+    end
+    print('--- parsed serving ---')
+    print(cjson.encode(parse_serving(at('AT+QENG="servingcell"'))))
+    print('--- parsed neighbours ---')
+    print(cjson.encode(parse_neighbours(at('AT+QENG="neighbourcell"'))))
+    print('--- parsed carriers ---')
+    local carriers, aggregate = parse_qcainfo(at('AT+QCAINFO'))
+    print(cjson.encode({ carriers = carriers, aggregate_mhz = aggregate }))
+    print('--- learned width cache ---')
+    print(cjson.encode(load_bw_cache()))
+end
+
+-- Fixtures in the shapes this modem family answers with, so the field
+-- positions the parsers assume can be re-checked after any firmware change
+-- without waiting for the radio to be in a particular state. Taken from real
+-- responses, with operator and cell identities replaced by test values.
+local FIXTURE_SERVING =
+    '+QENG: "servingcell","NOCONN","LTE","FDD",001,01,1A2B3C,211,275,1,4,4,3127,-99,-12,-67,11,7,100,-\n'
+
+local FIXTURE_NEIGHBOURS = table.concat({
+    '+QENG: "neighbourcell intra","LTE",275,211,-16,-99,-63,-,-,-,-,-,-',
+    '+QENG: "neighbourcell intra","LTE",275,216,-15,-99,-76,-,-,-,-,-,-',
+    '+QENG: "neighbourcell inter","LTE",1350,211,-14,-94,-70,-,-,-,-,-',
+    '+QENG: "neighbourcell inter","LTE",2850,125,-17,-108,-81,-,-,-,-,-'
+}, '\n')
+
+local FIXTURE_QCAINFO = table.concat({
+    '+QCAINFO: "PCC",275,75,"LTE BAND 1",1,211,-99,-16,-64,255',
+    '+QCAINFO: "SCC",1350,100,"LTE BAND 3",1,211,-94,-14,-70,1,0,-,-',
+    '+QCAINFO: "SCC",2850,100,"LTE BAND 7",1,211,-110,-18,-81,0,0,-,-',
+    '+QCAINFO: "SCC",3200,50,"LTE BAND 7",1,211,-104,-13,-82,2,0,-,-'
+}, '\n')
+
+-- The EN-DC form, band 3 with an n78 leg. Real captures with the operator
+-- and cell identities replaced; every field the parsers read is unchanged.
+local FIXTURE_SERVING_NSA = table.concat({
+    '+QENG: "servingcell","NOCONN"',
+    '+QENG: "LTE","FDD",001,02,4D5E6F,270,1550,3,5,5,19,-75,-12,-43,16,0,-,-',
+    '+QENG: "NR5G-NSA",001,02,302,-105,-1,-11,636672,78,12,1'
+}, '\n')
+
+local FIXTURE_SERVING_WCDMA =
+    '+QENG: "servingcell","NOCONN","WCDMA",001,02,1402,7A8B9C,10836,144,1,-61,-3,-,-,-,-,-\n'
+
+local FIXTURE_QCAINFO_NSA = table.concat({
+    '+QCAINFO: "PCC",1550,100,"LTE BAND 3",1,270,-75,-13,-43,9',
+    '+QCAINFO: "SCC",1694,50,"LTE BAND 3",1,270,-76,-8,-60,0,0,-,-',
+    '+QCAINFO: "SCC",636672,12,"NR5G BAND 78",302,-106,-14,-941'
+}, '\n')
+
+local function selftest()
+    local failures = 0
+
+    local function check(label, got, want)
+        local ok = tostring(got) == tostring(want)
+        if not ok then failures = failures + 1 end
+        print(string.format('%-42s %-12s %s', label, tostring(got), ok and 'ok' or ('EXPECTED ' .. tostring(want))))
+    end
+
+    local serving = parse_serving(FIXTURE_SERVING)
+    check('serving: parsed one cell', #serving, 1)
+    local sc = serving[1] or {}
+    check('serving: rat', sc.rat, 'LTE')
+    check('serving: cid', sc.cid, '1A2B3C')
+    check('serving: plmn', sc.plmn, '00101')
+    check('serving: pci', sc.pci, 211)
+    check('serving: earfcn', sc.earfcn, 275)
+    check('serving: band', sc.band, '1')
+    check('serving: dl bandwidth index', sc.bw_idx, 4)
+    check('serving: dl bandwidth MHz', sc.bw_mhz, 15)
+    check('serving: rsrp', sc.rsrp, -99)
+    check('serving: rsrq', sc.rsrq, -12)
+    check('serving: sinr', sc.sinr, 11)
+
+    local neighbours = parse_neighbours(FIXTURE_NEIGHBOURS)
+    check('neighbours: parsed all four', #neighbours, 4)
+    local n1 = neighbours[1] or {}
+    check('neighbour 1: earfcn', n1.earfcn, 275)
+    check('neighbour 1: pci', n1.pci, 211)
+    check('neighbour 1: rsrq', n1.rsrq, -16)
+    check('neighbour 1: rsrp', n1.rsrp, -99)
+    check('neighbour 1: sinr is absent', n1.sinr, nil)
+    local n4 = neighbours[4] or {}
+    check('neighbour 4: inter-freq earfcn', n4.earfcn, 2850)
+    check('neighbour 4: inter-freq pci', n4.pci, 125)
+    check('neighbour 4: inter-freq rsrp', n4.rsrp, -108)
+
+    -- The units trap: +QCAINFO counts LTE resource blocks, +QENG uses an index.
+    local carriers, aggregate = parse_qcainfo(FIXTURE_QCAINFO)
+    check('carriers: parsed all four', #carriers, 4)
+    check('carrier PCC: 75 RB is 15 MHz', carriers[1] and carriers[1].mhz, 15)
+    check('carrier SCC: 100 RB is 20 MHz', carriers[2] and carriers[2].mhz, 20)
+    check('carrier SCC: 50 RB is 10 MHz', carriers[4] and carriers[4].mhz, 10)
+    check('aggregate width', aggregate, 65)
+
+    -- The three-line EN-DC form, band 3 with an n78 leg. The
+    -- one-line parser returned nothing for it, which the daemon read as "the
+    -- lock killed service" and undid every escape onto a 5G-capable cell.
+    local nsa, reg = parse_serving(FIXTURE_SERVING_NSA)
+    check('nsa: registration state from the header', reg, 'NOCONN')
+    check('nsa: parsed both legs', #nsa, 2)
+    local anchor, leg = nsa[1] or {}, nsa[2] or {}
+    check('nsa anchor: rat', anchor.rat, 'LTE')
+    check('nsa anchor: cid', anchor.cid, '4D5E6F')
+    check('nsa anchor: plmn', anchor.plmn, '00102')
+    check('nsa leg: plmn', leg.plmn, '00102')
+
+    -- The width cache is per operator, so the other SIM's cells are unknown.
+    check('cache key carries the operator',
+        cache_key({ rat = 'LTE', pci = 239, earfcn = 2500 }, '00102'), '00102/LTE/239/2500')
+    check('cache key falls back to the cell\'s own operator',
+        cache_key({ rat = 'LTE', pci = 270, earfcn = 1550, plmn = '00102' }), '00102/LTE/270/1550')
+    check('nsa anchor: pci', anchor.pci, 270)
+    check('nsa anchor: earfcn', anchor.earfcn, 1550)
+    check('nsa anchor: band', anchor.band, '3')
+    check('nsa anchor: dl bandwidth MHz', anchor.bw_mhz, 20)
+    check('nsa anchor: rsrp', anchor.rsrp, -75)
+    check('nsa anchor: rsrq', anchor.rsrq, -12)
+    check('nsa anchor: sinr', anchor.sinr, 16)
+    check('nsa leg: rat', leg.rat, 'NR5G')
+    check('nsa leg: flagged nsa', leg.nsa, true)
+    check('nsa leg: pci', leg.pci, 302)
+    check('nsa leg: arfcn', leg.earfcn, 636672)
+    check('nsa leg: band', leg.band, '78')
+    check('nsa leg: dl bandwidth MHz', leg.bw_mhz, 100)
+    check('nsa leg: rsrp', leg.rsrp, -105)
+    check('nsa leg: sinr', leg.sinr, -1)
+    check('nsa leg: scs', leg.scs, 1)
+
+    -- 3G is where a failed 4G lock leaves the modem; it has to be seen.
+    local wcdma = parse_serving(FIXTURE_SERVING_WCDMA)
+    check('wcdma: parsed', #wcdma, 1)
+    local w = wcdma[1] or {}
+    check('wcdma: rat', w.rat, 'WCDMA')
+    check('wcdma: flagged legacy', w.legacy, true)
+    check('wcdma: cid', w.cid, '7A8B9C')
+    check('wcdma: uarfcn', w.earfcn, 10836)
+    check('wcdma: psc as pci', w.pci, 144)
+    check('wcdma: rscp as rsrp', w.rsrp, -61)
+
+    -- A searching modem answers with only the header.
+    local none, search = parse_serving('+QENG: "servingcell","SEARCH"\n')
+    check('search: no cells', #none, 0)
+    check('search: state', search, 'SEARCH')
+
+    -- NR carriers in +QCAINFO carry the bandwidth index, not MHz.
+    local nrc = parse_qcainfo(FIXTURE_QCAINFO_NSA)
+    check('nsa carriers: parsed all three', #nrc, 3)
+    check('nsa carrier PCC: 100 RB is 20 MHz', nrc[1] and nrc[1].mhz, 20)
+    check('nsa carrier NR: index 12 is 100 MHz', nrc[3] and nrc[3].mhz, 100)
+
+    -- Blacklist matching against the shapes the modem actually reports.
+    local cfg = { blocks = {
+        { pci = '211', earfcn = '275' },
+        { cid = '1a2b3c' },
+        { pci = '125' }
+    } }
+    check('block by pci+earfcn matches serving', (is_blocked(cfg, sc)), true)
+    check('block by pci+earfcn spares other carrier',
+        (is_blocked({ blocks = { { pci = '211', earfcn = '275' } } }, neighbours[3])), false)
+    check('block by pci alone catches every carrier',
+        (is_blocked({ blocks = { { pci = '211' } } }, neighbours[3])), true)
+    check('block by cid matches serving',
+        (is_blocked({ blocks = { { cid = '0x1A2B3C' } } }, sc)), true)
+    check('unrelated cell is not blocked',
+        (is_blocked(cfg, { rat = 'LTE', pci = 999, earfcn = 275 })), false)
+
+    -- Scoring: width must be able to outweigh a louder but narrower cell.
+    local scfg = { sinr_weight = 1.5, nr_bonus = 10, bw_weight = 0.5 }
+    local wide = { rat = 'LTE', rsrp = -99, sinr = 11, bw_mhz = 65 }
+    local loud = { rat = 'LTE', rsrp = -90, sinr = 11, bw_mhz = 10 }
+    check('wide 65MHz beats loud 10MHz', score(scfg, wide) > score(scfg, loud), true)
+    check('a cell with no rsrp is unscorable', score(scfg, { rat = 'LTE' }), nil)
+
+    print('')
+    print(failures == 0 and 'selftest: all checks passed'
+        or ('selftest: ' .. failures .. ' check(s) FAILED'))
+    return failures
+end
+
+local action = arg and arg[1] or 'run'
+
+if action == 'selftest' then
+    os.exit(selftest() == 0 and 0 or 1)
+elseif action == 'probe' then
+    probe()
+elseif action == 'once' then
+    local cfg = load_config()
+    tick(cfg, cfg.enabled)
+    save_state()
+    print(cjson.encode(state))
+elseif action == 'unlock' then
+    unlock()
+    print('lock released')
+elseif action == 'release' then
+    -- For service stop: let go only if the modem actually holds a lock, so a
+    -- shutdown with nothing to release does not make the modem re-register.
+    -- Both slots, because a lock belongs to the subscription it was set on and
+    -- the standby slot's is invisible from the active one.
+    local any = false
+    for _, slot in ipairs(ALL_SLOTS) do
+        local held = release_if_locked(slot)
+        if held then
+            any = true
+            print(string.format('released the lock on SIM %s (%s)', slot, label(held)))
+        end
+    end
+    if not any then print('no lock held on either SIM') end
+else
+    run()
+end

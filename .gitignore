@@ -1,0 +1,31 @@
+# Vendor firmware. The stock OTA package is GL.iNet / Qualcomm / Quectel
+# property and is never redistributed here. Download it yourself and unpack it
+# beside this file as e5800-<version>/ -- see README.md.
+/e5800-*/
+
+# Build products and intermediates.
+build/work/
+build/out/
+build/backup/
+
+# Vendor web UI bundles and the working copies derived from them. Only the
+# unified diffs in build/patches/ are published; run build/webui/tools/
+# extract.sh against your own rootfs to regenerate these.
+build/webui/orig/
+build/webui/base/
+build/webui/src/
+build/webui/dist/
+build/webui/broken/
+build/backend/orig/
+
+# Vendor files that our patches apply to, and the outputs built from them.
+build/patch/usr/sbin/gl-ngx-session
+build/patch/usr/share/gl-ngx/oui-rpc.lua
+build/patch/www/views/
+
+# Strings and key tables extracted from the vendor gl_screen binary.
+analysis/
+
+node_modules/
+.DS_Store
+*.swp

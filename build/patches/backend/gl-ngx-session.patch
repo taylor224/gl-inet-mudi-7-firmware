@@ -1,0 +1,223 @@
+--- a/gl-ngx-session
++++ b/gl-ngx-session
+@@ -54,6 +54,17 @@
+ 
+ local MAX_SESSION = 5
+ 
++-- Remembered devices.
++--
++-- Sessions live in memory and die with the daemon, so "remember this device"
++-- cannot be built on a longer session timeout -- a reboot would forget
++-- everyone. It needs its own credential, stored on disk.
++--
++-- Only a hash of the secret is kept here. The secret itself exists solely in
++-- the browser's cookie, so this file leaking does not hand anyone a login.
++local REMEMBER_PATH = '/etc/gl_remember.json'
++local remember_ttl
++
+ local login_wait = 0
+ local login_fail = 0
+ local login_fail_max_cnt
+@@ -128,6 +139,7 @@
+     login_fail_max_cnt = tonumber(c:get("oui-httpd", "main", "max_login_fail") or 10)
+     login_fail_wait_time = tonumber(c:get("oui-httpd", "main", "login_fail_wait") or 600)
+     session_timeout = tonumber(c:get("oui-httpd", "main", "session_timeout") or 300)
++    remember_ttl = tonumber(c:get("oui-httpd", "main", "remember_days") or 30) * 86400
+ 
+     clean_gl_token()
+ 
+@@ -234,6 +246,51 @@
+     db:close()
+ 
+     return aclgroup
++end
++
++local function load_remember()
++    local f = io.open(REMEMBER_PATH)
++    if not f then return {} end
++    local raw = f:read('*a')
++    f:close()
++    local ok, decoded = pcall(cjson.decode, raw)
++    if not ok or type(decoded) ~= 'table' then return {} end
++    return decoded
++end
++
++local function save_remember(store)
++    local f = io.open(REMEMBER_PATH .. '.tmp', 'w')
++    if not f then
++        log.err('cannot write ' .. REMEMBER_PATH)
++        return
++    end
++    f:write(cjson.encode(store))
++    f:close()
++    os.rename(REMEMBER_PATH .. '.tmp', REMEMBER_PATH)
++    os.execute('sync')
++end
++
++local function prune_remember(store)
++    local now = os.time()
++    local kept = {}
++    local dropped = 0
++    for _, entry in ipairs(store) do
++        if entry.expires and entry.expires > now then
++            kept[#kept + 1] = entry
++        else
++            dropped = dropped + 1
++        end
++    end
++    return kept, dropped
++end
++
++-- A token is "<id>.<secret>". The id finds the record without the secret ever
++-- being used as a lookup key, so an expired or unknown id costs one lookup and
++-- nothing else.
++local function split_token(token)
++    if type(token) ~= 'string' then return nil, nil end
++    local id, secret = token:match('^(%w+)%.(%w+)$')
++    return id, secret
+ end
+ 
+ local function create_session(username)
+@@ -479,7 +536,142 @@
+                         }
+                     })
+                 end, { username = ubus.STRING, hash = ubus.STRING }
++            },
++            -- Issue a remembering token for the browser holding this session.
++            remember = {
++                function(req, msg)
++                    local session = sessions[msg.sid]
++
++                    if not session then
++                        conn:reply(req, { code = ERROR_CODE_ACCESS })
++                        return
++                    end
++
++                    local store = prune_remember(load_remember())
++
++                    local id = generate_id(16)
++                    local secret = generate_id(32)
++
++                    store[#store + 1] = {
++                        id = id,
++                        username = session.username,
++                        hash = hex.encode(sha256.sum(secret)),
++                        created = os.time(),
++                        expires = os.time() + remember_ttl,
++                        label = type(msg.label) == 'string' and msg.label or ''
++                    }
++
++                    save_remember(store)
++
++                    log.info('remembered a device for', session.username)
++
++                    conn:reply(req, {
++                        code = 0,
++                        data = { token = id .. '.' .. secret, expires = os.time() + remember_ttl }
++                    })
++                end, { sid = ubus.STRING, label = ubus.STRING }
++            },
++            -- Trade a remembering token for a real session.
++            resume = {
++                function(req, msg)
++                    local id, secret = split_token(msg.token)
++
++                    if not id then
++                        conn:reply(req, { code = ERROR_CODE_INVALID_PARAMS })
++                        return
++                    end
++
++                    -- A stolen or guessed token is a login attempt, so it is
++                    -- rate limited exactly like one.
++                    if login_wait - sys.uptime() > 0 then
++                        conn:reply(req, { code = ERROR_CODE_LOGIN_FAIL_OVER_LIMIT,
++                            data = { wait = login_wait - sys.uptime() } })
++                        return
++                    end
++
++                    local store, dropped = prune_remember(load_remember())
++                    if dropped > 0 then save_remember(store) end
++
++                    local found
++                    for _, entry in ipairs(store) do
++                        if entry.id == id then found = entry end
++                    end
++
++                    if not found or found.hash ~= hex.encode(sha256.sum(secret)) then
++                        login_fail = login_fail + 1
++                        if login_fail == login_fail_max_cnt then
++                            login_fail = 0
++                            login_wait = sys.uptime() + login_fail_wait_time
++                        end
++                        conn:reply(req, { code = ERROR_CODE_ACCESS })
++                        return
++                    end
++
++                    -- The account may have been removed since the token was
++                    -- issued; a remembered device must not outlive its user.
++                    if not get_crypt_info(found.username) then
++                        conn:reply(req, { code = ERROR_CODE_ACCESS })
++                        return
++                    end
++
++                    login_fail = 0
++
++                    if session_cnt == MAX_SESSION then
++                        local li_sid
++                        for sid, s in pairs(sessions) do
++                            if not li_sid or s.timeout < sessions[li_sid].timeout then
++                                li_sid = sid
++                            end
++                        end
++                        if li_sid then
++                            sessions[li_sid] = nil
++                            session_cnt = session_cnt - 1
++                        end
++                        clean_gl_token()
++                    end
++
++                    found.last_used = os.time()
++                    save_remember(store)
++
++                    local sid = create_session(found.username)
++                    update_gl_token("/tmp/gl_token_" .. sid)
++
++                    log.info('resumed a session for', found.username)
++
++                    conn:reply(req, { code = 0, data = { username = found.username, sid = sid } })
++                end, { token = ubus.STRING }
+             },
++            -- Drop one remembered device, or every one of them.
++            forget = {
++                function(req, msg)
++                    local store = prune_remember(load_remember())
++
++                    if msg.all then
++                        save_remember({})
++                        conn:reply(req, { code = 0, data = { removed = #store } })
++                        return
++                    end
++
++                    local id = split_token(msg.token)
++                    if not id then
++                        conn:reply(req, { code = ERROR_CODE_INVALID_PARAMS })
++                        return
++                    end
++
++                    local kept = {}
++                    local removed = 0
++                    for _, entry in ipairs(store) do
++                        if entry.id == id then
++                            removed = removed + 1
++                        else
++                            kept[#kept + 1] = entry
++                        end
++                    end
++
++                    save_remember(kept)
++                    conn:reply(req, { code = 0, data = { removed = removed } })
++                end, { token = ubus.STRING, all = ubus.BOOLEAN }
++            },
+             logout = {
+                 function(req, msg)
+                     local sid = msg.sid

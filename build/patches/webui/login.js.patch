@@ -1,0 +1,204 @@
+--- a/login.js
++++ b/login.js
+@@ -1484,7 +1484,7 @@
+   '9a80': function (t, e, r) {
+     ((e = r('24fb')(!1)).push([
+       t.i,
+-      '.login-wrapper[data-v-13f06fe5]{width:100vw;min-height:100vh;min-height:100dvh;height:100%;background:var(--background-login)}.login-wrapper .gl-logo[data-v-13f06fe5]{width:97px;height:50px;padding:20px 16px 0 16px;margin-left:225px}.login-wrapper .gl-logo[data-v-13f06fe5] svg{width:100%!important;height:100%!important}.login-wrapper .gl-logo[data-v-13f06fe5] svg *{fill:#fff!important}.login-wrapper .typeof-router[data-v-13f06fe5]{display:flex;justify-content:center;align-items:center;width:100%;margin-top:70px;height:200px}.login-wrapper .typeof-router .svg-div[data-v-13f06fe5]{width:200px;height:200px}.login-wrapper .typeof-router .svg-div[data-v-13f06fe5] svg *{fill:var(--text-status-panel-active)}.login-wrapper .form-info[data-v-13f06fe5]{text-align:center}.login-wrapper .form-info h3[data-v-13f06fe5]{margin-top:10px;font-size:24px;font-weight:500;color:#fff}.login-wrapper .form-info p[data-v-13f06fe5]{color:var(--text-status-panel-active)}.login-wrapper .form-info .form-container[data-v-13f06fe5]{margin-top:20px;width:100vw;display:flex;flex-direction:column;align-items:center}.login-wrapper .form-info .form-container .iconfont[data-v-13f06fe5]{display:inline-block;width:30px;height:40px;text-align:center;cursor:pointer}.login-wrapper .form-info .form-container[data-v-13f06fe5] .el-form-item{margin-bottom:0;width:100%}.login-wrapper .form-info .form-container[data-v-13f06fe5] .el-form-item .el-input__inner{border-color:var(--border);color:var(--text-regular);background-color:var(--background-card)}.login-wrapper .form-info .form-container[data-v-13f06fe5] .el-form-item .el-input__inner:focus{border-color:var(--primary)}.login-wrapper .form-info .form-container[data-v-13f06fe5] .el-form-item.is-error .el-input__inner{border-color:var(--error)}.login-wrapper .form-info .form-container[data-v-13f06fe5] .el-form-item+.el-form-item__error{text-align:left}.login-wrapper .form-info .form-container .login-btn[data-v-13f06fe5]{display:flex;justify-content:center;align-items:center;margin-top:10px}.login-wrapper .form-info .form-container .login-btn .btn-item[data-v-13f06fe5]{width:124px;height:36px}.login-wrapper .form-info .form-container .forgot-container[data-v-13f06fe5]{margin-top:10px}.login-wrapper .form-info .form-container .forgot-btn[data-v-13f06fe5]{margin-left:10px;color:var(--text-status-panel);cursor:pointer}.login-wrapper .form-info .form-container .forgot-btn[data-v-13f06fe5]:hover{color:var(--text-status-panel-hover);text-decoration:underline}.login-wrapper .forget-dialog[data-v-13f06fe5] .el-dialog{max-width:300px;min-width:200px}.login-wrapper .forget-dialog .dialog-main[data-v-13f06fe5]{display:flex;flex-direction:column}.login-wrapper .forget-dialog .dialog-main span[data-v-13f06fe5]{margin-bottom:4px;font-size:14px}.login-wrapper .forget-dialog .btn[data-v-13f06fe5]{margin-top:10px;display:flex;justify-content:center;align-items:center}.login-wrapper .forget-dialog .btn .btn-item[data-v-13f06fe5]{width:124px;height:36px}.login-wrapper .login-form[data-v-13f06fe5]{width:80vw;max-width:340px;min-width:200px}.login-wrapper .login-form>li[data-v-13f06fe5]{width:100%;display:flex;align-items:center;justify-content:space-between;padding-bottom:20px}.login-wrapper .login-form>li>div[data-v-13f06fe5]{height:100%;display:flex;align-items:center}.login-wrapper .login-form>li>div[data-v-13f06fe5]:first-child{font-size:18px;color:#fff;margin-right:20px;width:60px;justify-content:flex-end}.login-wrapper .login-form>li>div[data-v-13f06fe5]:last-child{flex:1}@media screen and (max-width:786px){.login-wrapper .gl-logo[data-v-13f06fe5]{margin-left:0}}',
++      '.login-wrapper[data-v-13f06fe5]{width:100vw;min-height:100vh;min-height:100dvh;height:100%;background:var(--background-login)}.login-wrapper .gl-logo[data-v-13f06fe5]{width:97px;height:50px;padding:20px 16px 0 16px;margin-left:225px}.login-wrapper .gl-logo[data-v-13f06fe5] svg{width:100%!important;height:100%!important}.login-wrapper .gl-logo[data-v-13f06fe5] svg *{fill:#fff!important}.login-wrapper .typeof-router[data-v-13f06fe5]{display:flex;justify-content:center;align-items:center;width:100%;margin-top:70px;height:200px}.login-wrapper .typeof-router .svg-div[data-v-13f06fe5]{width:200px;height:200px}.login-wrapper .typeof-router .svg-div[data-v-13f06fe5] svg *{fill:var(--text-status-panel-active)}.login-wrapper .form-info[data-v-13f06fe5]{text-align:center}.login-wrapper .form-info h3[data-v-13f06fe5]{margin-top:10px;font-size:24px;font-weight:500;color:#fff}.login-wrapper .form-info p[data-v-13f06fe5]{color:var(--text-status-panel-active)}.login-wrapper .form-info .form-container[data-v-13f06fe5]{margin-top:20px;width:100vw;display:flex;flex-direction:column;align-items:center}.login-wrapper .form-info .form-container .iconfont[data-v-13f06fe5]{display:inline-block;width:30px;height:40px;text-align:center;cursor:pointer}.login-wrapper .form-info .form-container[data-v-13f06fe5] .el-form-item{margin-bottom:0;width:100%}.login-wrapper .form-info .form-container[data-v-13f06fe5] .el-form-item .el-input__inner{border-color:var(--border);color:var(--text-regular);background-color:var(--background-card)}.login-wrapper .form-info .form-container[data-v-13f06fe5] .el-form-item .el-input__inner:focus{border-color:var(--primary)}.login-wrapper .form-info .form-container[data-v-13f06fe5] .el-form-item.is-error .el-input__inner{border-color:var(--error)}.login-wrapper .form-info .form-container[data-v-13f06fe5] .el-form-item+.el-form-item__error{text-align:left}.login-wrapper .form-info .form-container .login-btn[data-v-13f06fe5]{display:flex;justify-content:center;align-items:center;margin-top:10px}.remember-row[data-v-13f06fe5]{display:flex;align-items:center;gap:8px;margin-top:16px;font-size:13px;color:var(--text-weak);cursor:pointer;user-select:none}.remember-row .remember-box[data-v-13f06fe5]{width:15px;height:15px;margin:0;accent-color:var(--primary);cursor:pointer}.remember-row .remember-info[data-v-13f06fe5]{font-size:14px;color:var(--text-disabled)}.remember-tip-text[data-v-13f06fe5]{margin:0;max-width:280px;line-height:1.5}.resuming-box[data-v-13f06fe5]{display:flex;align-items:center;justify-content:center;gap:10px;margin-top:40px;font-size:14px;color:var(--text-weak)}.resuming-box .icon-loading[data-v-13f06fe5]{font-size:18px;animation:remember-spin 1s linear infinite}@keyframes remember-spin{to{transform:rotate(360deg)}}@media (prefers-reduced-motion:reduce){.resuming-box .icon-loading[data-v-13f06fe5]{animation:none}}.login-wrapper .form-info .form-container .login-btn .btn-item[data-v-13f06fe5]{width:124px;height:36px}.login-wrapper .form-info .form-container .forgot-container[data-v-13f06fe5]{margin-top:10px}.login-wrapper .form-info .form-container .forgot-btn[data-v-13f06fe5]{margin-left:10px;color:var(--text-status-panel);cursor:pointer}.login-wrapper .form-info .form-container .forgot-btn[data-v-13f06fe5]:hover{color:var(--text-status-panel-hover);text-decoration:underline}.login-wrapper .forget-dialog[data-v-13f06fe5] .el-dialog{max-width:300px;min-width:200px}.login-wrapper .forget-dialog .dialog-main[data-v-13f06fe5]{display:flex;flex-direction:column}.login-wrapper .forget-dialog .dialog-main span[data-v-13f06fe5]{margin-bottom:4px;font-size:14px}.login-wrapper .forget-dialog .btn[data-v-13f06fe5]{margin-top:10px;display:flex;justify-content:center;align-items:center}.login-wrapper .forget-dialog .btn .btn-item[data-v-13f06fe5]{width:124px;height:36px}.login-wrapper .login-form[data-v-13f06fe5]{width:80vw;max-width:340px;min-width:200px}.login-wrapper .login-form>li[data-v-13f06fe5]{width:100%;display:flex;align-items:center;justify-content:space-between;padding-bottom:20px}.login-wrapper .login-form>li>div[data-v-13f06fe5]{height:100%;display:flex;align-items:center}.login-wrapper .login-form>li>div[data-v-13f06fe5]:first-child{font-size:18px;color:#fff;margin-right:20px;width:60px;justify-content:flex-end}.login-wrapper .login-form>li>div[data-v-13f06fe5]:last-child{flex:1}@media screen and (max-width:786px){.login-wrapper .gl-logo[data-v-13f06fe5]{margin-left:0}}',
+       ''
+     ]),
+       (t.exports = e));
+@@ -2077,8 +2077,63 @@
+       },
+       alive: function () {
+         return i('alive', { sid: window.$getCookie('Admin-Token') || '' });
++      },
++      // Ask the device to trust this browser from now on. The token it issues
++      // never reaches this code: it is set as an HttpOnly cookie, so a script
++      // on the page cannot read or steal it.
++      //
++      // These two deliberately do NOT go through window.$rpcRequest.
++      //
++      // Its shared error handler redirects to the login route whenever a call
++      // returns "Access denied", and it exempts exactly one method by name:
++      //
++      //   app.js:  if ("alive" !== t && ... )
++      //              else if ("accessDenied" === i && "login" !== history.current.name)
++      //                router.push({ name: "login", ... })
++      //
++      // `resume` failing is the normal case for a browser that was never
++      // remembered. Routed through that handler it pushes the router at the
++      // login route from inside that route's own beforeRouteEnter -- where
++      // history.current is still the *previous* route, so the "login" guard
++      // does not catch it. The guard re-runs, calls resume again, and the login
++      // page reloads forever. That is exactly what happened on the first build.
++      //
++      // A plain request carries no interceptor. same-origin credentials keep
++      // the HttpOnly remember cookie travelling.
++      rpcDirect: function (method, params) {
++        return fetch('/rpc', {
++          method: 'POST',
++          credentials: 'same-origin',
++          headers: { 'Content-Type': 'application/json' },
++          body: JSON.stringify({
++            jsonrpc: '2.0',
++            id: 1,
++            method: method,
++            params: params || {}
++          })
++        })
++          .then((res) => res.json())
++          .then((body) => {
++            if (!body || body.error) return Promise.reject((body && body.error) || 'no body');
++            return body.result;
++          });
++      },
++      remember: function () {
++        return a.rpcDirect('remember', { sid: window.$getCookie('Admin-Token') || '' });
++      },
++      // Trade the remember cookie back for a session. No arguments -- the
++      // cookie travels on its own and is read server side.
++      resume: function () {
++        return a.rpcDirect('resume', {});
+       }
+     };
++    // Set while a resume is in flight, so the form can be held back instead of
++    // flashing up for the moment before the redirect lands.
++    let resuming = !1;
++    // A second line of defence: whatever else happens, this page tries to
++    // resume at most once per load. Even a future change that reintroduces a
++    // redirect can then only cost one extra request, not an endless reload.
++    let resumeTried = !1;
+     var s = a,
+       c = r('2f62'),
+       u = {
+@@ -2089,7 +2144,38 @@
+               t ? r() : r({ name: e.name || 'internet' });
+             },
+             () => {
+-              r();
++              // No live session. If this browser was remembered, the device
++              // still holds a token for it, so trade that for a session and go
++              // to the dashboard rather than showing the form.
++              //
++              // The menu routes are loaded here for the same reason the normal
++              // login does it: the global router guard only loads them on the
++              // first navigation, which has already happened by now, so the
++              // dashboard route would not exist yet.
++              if (resumeTried) {
++                r();
++                return;
++              }
++              ((resumeTried = !0), (resuming = !0));
++              s.resume().then(
++                () => {
++                  r((n) => {
++                    n.$loadMenuRoute().then(
++                      () => {
++                        ((resuming = !1),
++                          (n.resuming = !1),
++                          n.$router.replace({ name: e.name || 'internet' }));
++                      },
++                      () => {
++                        ((resuming = !1), (n.resuming = !1));
++                      }
++                    );
++                  });
++                },
++                () => {
++                  ((resuming = !1), r());
++                }
++              );
+             }
+           );
+         },
+@@ -2097,7 +2183,9 @@
+           showForget: !1,
+           showPassword: !1,
+           form: { password: '', username: '' },
+-          isLoading: !1
++          isLoading: !1,
++          remember: !1,
++          resuming: resuming
+         }),
+         watch: {
+           username: {
+@@ -2171,13 +2259,18 @@
+           login(t) {
+             s.login(t)
+               .then((t) => {
++                // Remembering is best effort: if it fails the user is still
++                // logged in, and being told about it here would be noise.
++                const e = this.remember ? s.remember().catch(() => {}) : Promise.resolve();
+                 ((this.isLoading = !1),
+-                  this.$loadMenuRoute().then(() => {
+-                    const { goBack: t } = this.$route.params;
+-                    t && 'process' !== t
+-                      ? this.$router.replace({ name: t, query: this.$route.query })
+-                      : this.$router.replace({ name: 'internet' });
+-                  }));
++                  e.then(() =>
++                    this.$loadMenuRoute().then(() => {
++                      const t = this.$route.params.goBack;
++                      t && 'process' !== t
++                        ? this.$router.replace({ name: t, query: this.$route.query })
++                        : this.$router.replace({ name: 'internet' });
++                    })
++                  ));
+               })
+               .catch((t) => {
+                 ((this.isLoading = !1),
+@@ -2235,6 +2328,18 @@
+         function () {
+           var t = this,
+             e = t._self._c;
++          // A remembered browser is a second away from the dashboard. Showing
++          // the password form for that second, then yanking it away, reads as a
++          // failed login.
++          if (t.resuming) {
++            return e('div', { staticClass: 'login-wrapper' }, [
++              e('div', { staticClass: 'gl-logo', domProps: { innerHTML: t._s(t.logoSvg) } }),
++              e('div', { staticClass: 'resuming-box' }, [
++                e('i', { staticClass: 'iconfont icon-loading' }),
++                e('span', [t._v(t._s(t.$t('session.resuming')))])
++              ])
++            ]);
++          }
+           return e('div', { staticClass: 'login-wrapper' }, [
+             e('div', { staticClass: 'gl-logo', domProps: { innerHTML: t._s(t.logoSvg) } }),
+             e('div', { staticClass: 'typeof-router', attrs: { id: t.model } }, [
+@@ -2375,6 +2480,33 @@
+                       ])
+                     ]
+                   ),
++                  e('label', { staticClass: 'remember-row' }, [
++                    e('input', {
++                      staticClass: 'remember-box',
++                      attrs: { type: 'checkbox' },
++                      domProps: { checked: t.remember },
++                      on: {
++                        change: function (n) {
++                          t.remember = n.target.checked;
++                        }
++                      }
++                    }),
++                    e('span', { staticClass: 'remember-label' }, [
++                      t._v(t._s(t.$t('session.remember_label')))
++                    ]),
++                    e(
++                      'el-tooltip',
++                      { attrs: { placement: 'top' } },
++                      [
++                        e('div', { attrs: { slot: 'content' }, slot: 'content' }, [
++                          e('p', { staticClass: 'remember-tip-text' }, [
++                            t._v(t._s(t.$t('session.remember_tips')))
++                          ])
++                        ]),
++                        e('i', { staticClass: 'iconfont icon-info remember-info' })
++                      ]
++                    )
++                  ]),
+                   e(
+                     'div',
+                     { staticClass: 'login-btn' },

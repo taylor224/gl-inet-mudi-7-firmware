@@ -1,0 +1,32 @@
+config rssiguard 'global'
+	# Master switch. No client is touched while this is 0.
+	option enabled '0'
+
+	# Clients weaker than this are candidates for disconnection, in dBm.
+	# -75 is a reasonable floor for usable throughput; -80 is lenient,
+	# -70 aggressive. Values are negative.
+	option min_rssi '-75'
+
+	# Seconds between signal polls.
+	option interval '10'
+
+	# Consecutive low readings before a client is disconnected. Wi-Fi RSSI
+	# swings several dB between samples, so acting on one reading kicks
+	# people who never actually left the room.
+	option strikes '3'
+
+	# Seconds a disconnected client stays in the deny list. Without it the
+	# client re-associates to this AP within a second and nothing is
+	# achieved; the ban is what gives it a reason to look elsewhere.
+	# 0 disconnects without banning.
+	option ban_time '30'
+
+	# Ignore a client for this long after it associates, in seconds. A
+	# device negotiating a new link often reports poor signal briefly.
+	option grace '30'
+
+# MACs that are never disconnected, however weak.
+#
+# config exempt
+#	option mac 'AA:BB:CC:DD:EE:FF'
+#	option note 'printer in the far room'

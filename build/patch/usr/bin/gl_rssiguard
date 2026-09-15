@@ -1,0 +1,386 @@
+#!/usr/bin/lua
+--
+-- gl_rssiguard -- disconnect Wi-Fi clients whose signal falls below a floor,
+-- so they roam somewhere better instead of dragging the airtime down.
+--
+-- Signal comes from `iwinfo <iface> assoclist`, which reports per-station RSSI
+-- without disturbing the link. Disconnection goes through hostapd_cli, which
+-- this build supports: deauthenticate, plus deny_acl ADD_MAC / DEL_MAC for a
+-- temporary ban.
+--
+-- Two details decide whether this helps or hurts:
+--
+--   strikes   RSSI swings several dB between samples. Acting on a single
+--             reading disconnects people who never moved, so a client has to
+--             be under the floor for `strikes` consecutive polls.
+--   ban_time  A deauthenticated client re-associates to the same AP almost
+--             immediately. Without a short stay in the deny list the kick
+--             achieves nothing but a dropped connection.
+--
+-- A client is judged only on its own signal. This cannot know whether a better
+-- AP exists, so on a single-AP network a banned client simply loses service
+-- for ban_time -- which is the intended behaviour when the floor is set to
+-- "below this, service is not worth having", and a trap otherwise.
+
+local cjson = require 'cjson'
+
+local STATE_PATH = '/tmp/gl_rssiguard.json'
+local LOG_TAG = 'gl_rssiguard'
+local KICK_HISTORY = 20
+
+local state = {
+    running = false,
+    clients = {},
+    recent = {},
+    last_error = nil,
+    updated = 0
+}
+
+-- mac -> consecutive readings below the floor
+local strikes = {}
+-- mac -> uptime at which the ban should be lifted
+local bans = {}
+-- mac -> uptime when we first saw it associated
+local first_seen = {}
+
+--------------------------------------------------------------------- helpers
+
+local function log(level, msg)
+    os.execute(string.format('logger -t %s -p daemon.%s %q', LOG_TAG, level, msg))
+end
+
+-- Declared as a variable, not a plain function, so selftest can swap in
+-- fixtures without touching the parsers.
+local shell
+shell = function(cmd)
+    local f = io.popen(cmd .. ' 2>/dev/null')
+    if not f then return '' end
+    local out = f:read('*a') or ''
+    f:close()
+    return out
+end
+
+local function uci_get(key, default)
+    local v = shell('uci -q get ' .. key):gsub('%s+$', '')
+    if v == '' then return default end
+    return v
+end
+
+local function uci_num(key, default)
+    return tonumber(uci_get(key, nil)) or default
+end
+
+local function uptime()
+    local f = io.open('/proc/uptime')
+    if not f then return os.time() end
+    local v = tonumber((f:read('*l') or '0'):match('^%S+')) or 0
+    f:close()
+    return v
+end
+
+--------------------------------------------------------------------- config
+
+local function load_config()
+    local cfg = {
+        enabled = uci_get('rssiguard.global.enabled', '0') == '1',
+        min_rssi = uci_num('rssiguard.global.min_rssi', -75),
+        interval = uci_num('rssiguard.global.interval', 10),
+        strikes = uci_num('rssiguard.global.strikes', 3),
+        ban_time = uci_num('rssiguard.global.ban_time', 30),
+        grace = uci_num('rssiguard.global.grace', 30),
+        exempt = {}
+    }
+
+    if cfg.interval < 2 then cfg.interval = 2 end
+    if cfg.strikes < 1 then cfg.strikes = 1 end
+
+    for line in shell('uci -q show rssiguard'):gmatch('[^\n]+') do
+        local mac = line:match("rssiguard%.@exempt%[%d+%]%.mac='?([^']*)'?")
+        if mac and mac ~= '' then
+            cfg.exempt[mac:upper()] = true
+        end
+    end
+
+    return cfg
+end
+
+--------------------------------------------------------------- wifi plumbing
+
+-- Every interface running as an AP. Clients only exist on those.
+local function ap_interfaces()
+    local ifaces = {}
+    local current
+
+    for line in shell('iwinfo'):gmatch('[^\n]+') do
+        local name = line:match('^(%S+)%s+ESSID')
+        if name then
+            current = name
+        elseif current and line:match('Mode:%s*Master') then
+            ifaces[#ifaces + 1] = current
+            current = nil
+        end
+    end
+
+    return ifaces
+end
+
+-- "AA:BB:CC:DD:EE:FF  -55 dBm / -95 dBm (SNR 40)  1234 ms ago"
+local function assoclist(iface)
+    local stations = {}
+
+    for line in shell('iwinfo ' .. iface .. ' assoclist'):gmatch('[^\n]+') do
+        local mac, signal = line:match('^(%x%x:%x%x:%x%x:%x%x:%x%x:%x%x)%s+(-?%d+)%s+dBm')
+        if mac then
+            local noise = line:match('dBm%s*/%s*(-?%d+)%s+dBm')
+            local snr = line:match('SNR%s+(-?%d+)')
+            stations[#stations + 1] = {
+                mac = mac:upper(),
+                iface = iface,
+                signal = tonumber(signal),
+                noise = tonumber(noise),
+                snr = tonumber(snr)
+            }
+        end
+    end
+
+    return stations
+end
+
+local function hostapd(iface, args)
+    return shell(string.format('hostapd_cli -i %s %s', iface, args))
+end
+
+local function ban(iface, mac, seconds)
+    if seconds > 0 then
+        hostapd(iface, 'deny_acl ADD_MAC ' .. mac)
+        bans[mac] = { until_at = uptime() + seconds, iface = iface }
+    end
+    hostapd(iface, 'deauthenticate ' .. mac)
+end
+
+local function lift_expired_bans()
+    local now = uptime()
+    for mac, info in pairs(bans) do
+        if now >= info.until_at then
+            hostapd(info.iface, 'deny_acl DEL_MAC ' .. mac)
+            bans[mac] = nil
+        end
+    end
+end
+
+-- Anything we put in a deny list has to come back out when we stop, otherwise
+-- a client stays locked out until the AP restarts.
+local function clear_all_bans()
+    for mac, info in pairs(bans) do
+        hostapd(info.iface, 'deny_acl DEL_MAC ' .. mac)
+        bans[mac] = nil
+    end
+end
+
+--------------------------------------------------------------------- history
+
+local function remember_kick(entry)
+    table.insert(state.recent, 1, entry)
+    while #state.recent > KICK_HISTORY do
+        table.remove(state.recent)
+    end
+end
+
+--------------------------------------------------------------------- the loop
+
+local function save_state()
+    state.updated = os.time()
+    local f = io.open(STATE_PATH .. '.tmp', 'w')
+    if not f then return end
+    f:write(cjson.encode(state))
+    f:close()
+    os.rename(STATE_PATH .. '.tmp', STATE_PATH)
+end
+
+-- `enforce` false means watch and report but never disconnect anyone.
+--
+-- The signal list is what a threshold gets chosen from, so it has to be
+-- visible before the feature is switched on -- otherwise the setting can only
+-- be picked blind, which is how the first version shipped.
+local function tick(cfg, enforce)
+    if enforce then lift_expired_bans() end
+
+    local now = uptime()
+    local seen = {}
+    local clients = {}
+
+    for _, iface in ipairs(ap_interfaces()) do
+        for _, sta in ipairs(assoclist(iface)) do
+            seen[sta.mac] = true
+            first_seen[sta.mac] = first_seen[sta.mac] or now
+
+            local exempt = cfg.exempt[sta.mac] == true
+            local settling = (now - first_seen[sta.mac]) < cfg.grace
+            local weak = sta.signal ~= nil and sta.signal < cfg.min_rssi
+
+            if not enforce or exempt or settling or not weak then
+                strikes[sta.mac] = 0
+            else
+                strikes[sta.mac] = (strikes[sta.mac] or 0) + 1
+            end
+
+            sta.strikes = strikes[sta.mac] or 0
+            sta.exempt = exempt
+            sta.settling = settling
+            sta.banned = bans[sta.mac] ~= nil
+            clients[#clients + 1] = sta
+
+            if enforce and not exempt and not settling and weak and sta.strikes >= cfg.strikes then
+                local msg = string.format('%s on %s at %d dBm, below %d for %d polls',
+                    sta.mac, iface, sta.signal, cfg.min_rssi, sta.strikes)
+                log('notice', 'disconnecting ' .. msg)
+                ban(iface, sta.mac, cfg.ban_time)
+                strikes[sta.mac] = 0
+                remember_kick({
+                    mac = sta.mac,
+                    iface = iface,
+                    signal = sta.signal,
+                    at = os.time(),
+                    ban_time = cfg.ban_time
+                })
+            end
+        end
+    end
+
+    -- Forget clients that are gone, so a returning device starts clean.
+    for mac in pairs(strikes) do
+        if not seen[mac] then strikes[mac] = nil end
+    end
+    for mac in pairs(first_seen) do
+        if not seen[mac] and not bans[mac] then first_seen[mac] = nil end
+    end
+
+    state.clients = clients
+    state.enforcing = enforce and true or false
+end
+
+local function run()
+    log('notice', 'started')
+    state.running = true
+
+    while true do
+        local cfg = load_config()
+
+        -- Poll either way. Only act when switched on.
+        if not cfg.enabled then
+            if next(bans) then clear_all_bans() end
+            strikes = {}
+        end
+
+        local ok, err = pcall(tick, cfg, cfg.enabled)
+        if ok then
+            state.last_error = nil
+        else
+            state.last_error = tostring(err)
+            log('err', 'tick failed: ' .. tostring(err))
+        end
+
+        save_state()
+        os.execute('sleep ' .. cfg.interval)
+    end
+end
+
+-- Fixtures in the shapes iwinfo answers with, so what these parsers depend
+-- on can be re-checked after a firmware change. Taken from real output, with
+-- network names and hardware addresses replaced by test values.
+local FIXTURE_IWINFO = table.concat({
+    'wlan0     ESSID: "TestNet-2G"',
+    '          Access Point: 02:00:00:00:00:01',
+    '          Mode: Master  Channel: 11 (2.462 GHz)  HT Mode: NOHT',
+    '          Signal: -42 dBm  Noise: -96 dBm',
+    '',
+    'wlan1     ESSID: "TestNet-5G"',
+    '          Access Point: 02:00:00:00:00:02',
+    '          Mode: Master  Channel: 40 (5.200 GHz)  HT Mode: HE80',
+    '          Signal: -41 dBm  Noise: -96 dBm'
+}, '\n')
+
+local FIXTURE_ASSOCLIST = table.concat({
+    '02:00:00:00:01:01  -45 dBm / -96 dBm (SNR 51)  3956 ms ago',
+    '\tRX: 1080.6 MBit/s, HE-MCS 10, 80MHz, HE-NSS 2, HE-GI 0, HE-DCM 0    176238 Pkts.',
+    '\tTX: 960.7 MBit/s, HE-MCS 9, 80MHz, HE-NSS 2, HE-GI 0, HE-DCM 0   1462448 Pkts.',
+    '\texpected throughput: 866.7 MBit/s',
+    '',
+    '02:00:00:00:01:02  -39 dBm / -96 dBm (SNR 57)  4 ms ago',
+    '\tRX: 1200.9 MBit/s                             244906 Pkts.',
+    '\tTX: 1080.6 MBit/s                             216694 Pkts.'
+}, '\n')
+
+local function selftest()
+    local failures = 0
+
+    local function check(label, got, want)
+        local ok = tostring(got) == tostring(want)
+        if not ok then failures = failures + 1 end
+        print(string.format('%-44s %-14s %s', label, tostring(got), ok and 'ok' or ('EXPECTED ' .. tostring(want))))
+    end
+
+    -- Swap the shell out so the parsers read the fixtures instead of the radio.
+    local real_shell = shell
+    shell = function(cmd)
+        if cmd:match('^iwinfo%s*$') then return FIXTURE_IWINFO end
+        if cmd:match('assoclist') then return FIXTURE_ASSOCLIST end
+        return ''
+    end
+
+    local ifaces = ap_interfaces()
+    check('found both AP interfaces', #ifaces, 2)
+    check('first AP interface', ifaces[1], 'wlan0')
+    check('second AP interface', ifaces[2], 'wlan1')
+
+    local stations = assoclist('wlan1')
+    check('parsed both stations', #stations, 2)
+    local a = stations[1] or {}
+    check('station 1: mac is upper case', a.mac, '02:00:00:00:01:01')
+    check('station 1: signal', a.signal, -45)
+    check('station 1: noise', a.noise, -96)
+    check('station 1: snr', a.snr, 51)
+    check('station 1: interface', a.iface, 'wlan1')
+    local b = stations[2] or {}
+    check('station 2: mac', b.mac, '02:00:00:00:01:02')
+    check('station 2: signal', b.signal, -39)
+    -- The RX/TX/throughput lines must not be mistaken for stations.
+    check('rate lines are not stations', #stations, 2)
+
+    shell = real_shell
+
+    -- Exempt matching is case insensitive because iwinfo prints lower case and
+    -- the config is written by hand.
+    local cfg = { exempt = { ['02:00:00:00:01:01'] = true } }
+    check('exempt matches the upper-cased mac', cfg.exempt[a.mac], true)
+    check('a different mac is not exempt', cfg.exempt[b.mac], nil)
+
+    print('')
+    print(failures == 0 and 'selftest: all checks passed'
+        or ('selftest: ' .. failures .. ' check(s) FAILED'))
+    return failures
+end
+
+local action = arg and arg[1] or 'run'
+
+if action == 'selftest' then
+    os.exit(selftest() == 0 and 0 or 1)
+elseif action == 'once' then
+    local cfg = load_config()
+    tick(cfg, cfg.enabled)
+    save_state()
+    print(cjson.encode(state))
+elseif action == 'clear' then
+    clear_all_bans()
+    print('deny lists cleared')
+elseif action == 'probe' then
+    print('AP interfaces: ' .. table.concat(ap_interfaces(), ', '))
+    for _, iface in ipairs(ap_interfaces()) do
+        print('\n--- iwinfo ' .. iface .. ' assoclist ---')
+        print(shell('iwinfo ' .. iface .. ' assoclist'))
+        print('--- parsed ---')
+        print(cjson.encode(assoclist(iface)))
+    end
+else
+    run()
+end

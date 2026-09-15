@@ -1,0 +1,21 @@
+// Product layer -- highest priority of the four gl_screen layout layers.
+// Load order: reference -> inch -> screen -> product. Last definition wins.
+//
+// Syntax (parsed by /etc/gl_screen/scripts/kv_config.lua):
+//   KEY 123          integer
+//   KEY 1.5          float
+//   KEY "text"       string
+//   KEY &POINTER     pointer
+//   KEY OTHER_KEY    reference to another key
+//
+// Compiled defaults cannot be read out of the gl_screen binary, so values are
+// absolute, not deltas. Find them by writing a key, running
+// `/etc/init.d/gl_screen reload`, and looking at the panel.
+//
+// Every addressable key is listed in analysis/screen_keys.csv.
+// Examples, commented out:
+//
+// HOME_WIFI_CARD_X 24
+// HOME_WIFI_CARD_Y 96
+// HOME_WIFI_CARD_WIDTH 200
+// LOCK_SCREEN_DATA_STYLE1_MINUTE_LABEL_COLOR 0xD98E4F
