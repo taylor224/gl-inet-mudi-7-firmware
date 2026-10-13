@@ -8,9 +8,9 @@ config cellguard 'global'
 	# Both reads are local AT queries and do not trigger a network scan.
 	option interval '5'
 
-	# Minimum seconds between two lock changes. Locking makes the modem
-	# re-register, which drops the data connection for a few seconds, so
-	# this is what stops a 5 second poll from becoming a 5 second outage.
+	# Minimum seconds between two lock changes. Every lock or unlock
+	# restarts the radio and ends the data call, so this is what stops a
+	# 5 second poll from becoming a 5 second outage.
 	option dwell '120'
 
 	# A candidate must beat the serving cell by this many points before a
@@ -35,7 +35,8 @@ config cellguard 'global'
 	# Every lock issued counts against max_attempts, whether it lands or not,
 	# and the count decays after this many seconds instead of resetting each
 	# time the serving cell changes. So the worst case is max_attempts
-	# reconnections per escape_reset per blacklisted cell.
+	# reconnections per escape_reset per blacklisted cell. A voluntary switch
+	# that fails also suspends voluntary switching for this long.
 	option escape_reset '1800'
 
 	# Neighbours below this RSRP (dBm) are never locked to. A lock onto a
@@ -58,7 +59,9 @@ config cellguard 'global'
 	# from a merely loud one, so at 0.5 a 100 MHz NR carrier is worth 50
 	# points against a 20 MHz LTE one's 10. Neighbour reports carry no
 	# width, so this only applies to cells the router has camped on before
-	# and recorded in /etc/gl_cellguard_bw.json.
+	# and recorded in /etc/gl_cellguard_bw.json -- the widest each has been
+	# seen at, which is also what the serving cell is scored on. Only those
+	# cells are ever locked to, escapes included.
 	option bw_weight '0.5'
 
 	# Leave the modem unlocked when every visible cell is blacklisted,

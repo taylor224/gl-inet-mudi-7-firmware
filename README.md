@@ -49,8 +49,9 @@ The modem has no "avoid this cell" command. `AT+QNWLOCK` only pins the radio
 cell and its neighbours every few seconds, and when the modem lands on an
 excluded cell it locks onto the best allowed neighbour instead.
 
-Acting is expensive — each lock makes the modem re-register and costs a few
-seconds of data — so the daemon is built around not doing it too often:
+Acting is expensive. Every `AT+QNWLOCK` write, an unlock included, restarts
+the radio — the modem drops to low-power mode and back, and the data call ends
+— so the daemon is built around writing as rarely as it can:
 
 - Escapes are rationed. Each attempt counts against a budget that decays on a
   timer rather than resetting whenever the serving cell changes, so a modem
@@ -58,11 +59,17 @@ seconds of data — so the daemon is built around not doing it too often:
 - Candidates must clear a signal floor, and the serving cell is excluded from
   its own neighbour list, so a lock is never issued to a cell the modem cannot
   hold or to where it already is.
-- Voluntary switches go only to cells this SIM has camped on before. A
+- Locks, escapes included, go only to cells this SIM has camped on before. A
   neighbour list is not filtered by operator, so on a dual-SIM router the other
-  SIM's strongest cell otherwise looks like the best candidate there is.
-- Where the modem accepts a multi-cell lock, the escape pins a list of allowed
+  SIM's cells sit in it looking like fine candidates; a lock to one can only
+  end on 3G. With no known cell in range, the modem is left on the excluded
+  cell rather than locked to nothing.
+- Where the modem accepts a multi-cell lock, every lock pins a list of allowed
   cells rather than one, so the modem can still hand over between them.
+- A voluntary switch that fails suspends switching for the same decay period
+  as the escape budget, instead of trying the next candidate two minutes later.
+- An unlock writes only the lock form (4G or 5G) that is actually set, so
+  letting go costs one restart, not two.
 - A lock is released when it is no longer needed: the signal falls away, the
   modem drops to 3G, the excluded cell leaves the blacklist, the feature is
   switched off, or the service stops.
@@ -70,14 +77,18 @@ seconds of data — so the daemon is built around not doing it too often:
 Scoring is a throughput proxy — signal, plus signal quality, plus a bonus for
 5G, plus aggregate carrier bandwidth. Bandwidth is only reported for the cell
 the modem is camped on, so it is learned and cached per operator and cell, and
-a neighbour seen before is scored with the width measured then.
+a neighbour seen before is scored with the width measured then. The cache keeps
+the widest reading, and the serving cell is scored on its cached width too:
+secondary carriers are only listed while data is flowing, so an idle modem
+under-reports its own cell and would otherwise lose to any neighbour remembered
+from a busy moment.
 
 Three things about this modem family turned out to matter, and are handled:
 
 | | |
 |---|---|
 | `AT+QENG="servingcell"` in 5G NSA | Answers on **three** lines — a header, an LTE anchor line, and an `NR5G-NSA` line — not the single line an LTE-only attach returns. A parser that knows only the single-line form sees no serving cell at all while the modem is on 5G, which every safety rule then reads as "the lock killed service". |
-| `AT+QNWLOCK` on a dual-SIM unit | Lock state belongs to the **SIM subscription it was set on**. A lock left on the standby slot is invisible from the active slot, survives indefinitely, and takes effect again the moment a failover makes that slot active — pinning the modem to a cell it may no longer reach. Both slots are swept. |
+| `AT+QNWLOCK` on a dual-SIM unit | Lock state belongs to the **SIM subscription it was set on**. A lock left on the standby slot is invisible from the active slot, survives indefinitely, and takes effect again the moment a failover makes that slot active — pinning the modem to a cell it may no longer reach. Both slots are swept, and the standby slot again every minute: a failover restarts the radio, and a sweep that asks while it is down gets no answer. |
 | `AT+QCAINFO` units | LTE carrier width arrives in resource blocks, NR width as a bandwidth index, and neither is MHz. Unconverted, a 15 MHz carrier scores as though it were 75. |
 
 A lock outlives the process that set it, so the daemon also adopts any lock it
