@@ -68,6 +68,14 @@ the radio — the modem drops to low-power mode and back, and the data call ends
   cells rather than one, so the modem can still hand over between them.
 - A voluntary switch that fails suspends switching for the same decay period
   as the escape budget, instead of trying the next candidate two minutes later.
+- A secondary carrier of the serving cell is never a voluntary target. The
+  neighbour list reports each one as a cell of its own, and a low-band carrier
+  is often 20-30 dB louder than the primary, but the connection is already
+  aggregating it; a lock to it restarts the radio and lands back on the same
+  set of carriers.
+- A list lock lets the modem choose among the listed cells. When it settles on
+  one that is not the target, that target is left alone for six hours and
+  switching is suspended, rather than asking again every dwell.
 - An unlock writes only the lock form (4G or 5G) that is actually set, so
   letting go costs one restart, not two.
 - A lock is released when it is no longer needed: the signal falls away, the

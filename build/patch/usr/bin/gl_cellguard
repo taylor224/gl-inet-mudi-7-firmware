@@ -469,11 +469,13 @@ local function parse_qcainfo(text)
             local band = unquote(f[4])
             local rat = band:match('^NR') and 'NR5G' or 'LTE'
             local mhz = carrier_bw_to_mhz(rat, width)
+            -- LTE: ...,<band>,<state>,<pci>,...   NR: ...,<band>,<pci>,...
+            local pci = num(rat == 'NR5G' and f[5] or f[6])
 
             if mhz then
                 total = total + mhz
                 carriers[#carriers + 1] = {
-                    role = role, freq = freq, band = band, mhz = mhz
+                    role = role, freq = freq, band = band, mhz = mhz, pci = pci
                 }
             else
                 log('debug', 'unparsed QCAINFO line: ' .. line)
@@ -622,6 +624,39 @@ local function same_cell(a, b)
     return a and b and a.pci == b.pci and a.earfcn == b.earfcn
 end
 
+-- Carriers seen aggregated with a primary cell, by the primary's escape key.
+-- An idle modem reports its primary carrier alone, so the live +QCAINFO list
+-- is not enough to recognise a secondary an hour later.
+local ca_peers = {}
+
+local function carrier_key(pci, freq)
+    return tostring(pci) .. '/' .. tostring(freq)
+end
+
+local function learn_carriers(serving)
+    if not (serving.pci and serving.earfcn) then return end
+    local key = escape_key(serving)
+    for _, carrier in ipairs(serving.carriers or {}) do
+        if carrier.freq then
+            ca_peers[key] = ca_peers[key] or {}
+            ca_peers[key][carrier_key(carrier.pci or serving.pci, carrier.freq)] = true
+        end
+    end
+end
+
+-- Whether `cell` is a carrier the serving cell aggregates. The neighbour list
+-- reports each secondary carrier as a cell of its own, and a low-band one is
+-- routinely 20-30 dB louder than the primary, so it scores as a far better
+-- cell -- but the connection is already using it, and a lock "to" it only
+-- restarts the radio and lands back on some carrier of the same set. On
+-- 2026-11-10 that was a lock every dwell, 20-30 s of no internet out of every
+-- 120, for a +13.5 "gain" to a carrier that was already an SCC.
+local function is_own_carrier(cell, serving)
+    if not (cell and serving and cell.pci and cell.earfcn) then return false end
+    local peers = ca_peers[escape_key(serving)]
+    return peers ~= nil and peers[carrier_key(cell.pci, cell.earfcn)] == true
+end
+
 -- The cell to lock to, and the others to allow alongside it in a list lock,
 -- from `candidates` (best first). Only cells this SIM has camped on qualify:
 -- the neighbour list is not filtered by operator, and the other SIM's cells
@@ -630,11 +665,20 @@ end
 -- the SIM cannot register on ends on 3G or with no service. Measured over
 -- 2026-09-16..10-12: all 12 escapes onto an unknown cell failed that way,
 -- against 9 of 12 onto known cells landing. `failed` holds escape keys to skip.
-local function pick_target(candidates, failed)
+--
+-- `elsewhere` is for voluntary switches: a carrier the serving cell already
+-- aggregates is no target (see is_own_carrier), though it stays in the group
+-- so the modem may keep it. An escape leaves it unset -- another carrier of
+-- the same tower is a different cell as far as the blacklist is concerned.
+local function pick_target(candidates, failed, elsewhere)
     local target, group = nil, {}
     for _, c in ipairs(candidates) do
         if c.bw_known and not (failed and failed[escape_key(c)]) then
-            if not target then target = c else group[#group + 1] = c end
+            if not target and not (elsewhere and c.aggregated) then
+                target = c
+            else
+                group[#group + 1] = c
+            end
         end
     end
     return target, group
@@ -828,10 +872,33 @@ local last_lock_probe = 0
 -- Voluntary switching is suspended until this uptime after a switch fails.
 local switch_paused_until = 0
 
+-- The target of a voluntary lock that has not been judged yet, and the targets
+-- that were locked to without the modem ever camping on them (escape key ->
+-- uptime of the miss). A list lock lets the modem choose among the listed
+-- cells, so "the lock was accepted" is not "we are on the target": where it
+-- keeps choosing another, asking again every dwell buys a radio restart each
+-- time and nothing else. A missed target is left alone for SWITCH_RETRY_AFTER.
+local switch_pending = nil
+local switch_missed = {}
+local SWITCH_RETRY_AFTER = 6 * 3600
+
+local function missed_targets(now)
+    local skip = {}
+    for key, at_time in pairs(switch_missed) do
+        if now - at_time < SWITCH_RETRY_AFTER then
+            skip[key] = true
+        else
+            switch_missed[key] = nil
+        end
+    end
+    return skip
+end
+
 -- Release a held lock and say why. `last_switch` restarts the dwell clock so
 -- the next voluntary move is at least `dwell` away from this one.
 local function drop_lock(reason, level)
     unlock()
+    switch_pending = nil
     state.locked = nil
     state.lock_from = nil
     state.adopted = nil
@@ -853,6 +920,7 @@ end
 local function adopt_stray_lock(why)
     local held = read_lock()
     if not held then return false end
+    switch_pending = nil
     state.locked = held
     state.lock_from = nil
     state.adopted = true
@@ -1037,6 +1105,7 @@ local function tick(cfg, enforce)
     if aggregate then serving.bw_mhz = aggregate end
     serving.bw_known = serving.bw_mhz ~= nil
     learn_bw(serving, aggregate)
+    learn_carriers(serving)
     serving.cap_mhz = recall_bw(serving, serving.plmn)
 
     local blocked_now, matched = is_blocked(cfg, serving)
@@ -1056,6 +1125,9 @@ local function tick(cfg, enforce)
         -- The serving cell lists itself among the intra-frequency neighbours.
         -- Locking to where we already are is a reconnection for nothing.
         c.self = same_cell(c, serving)
+        -- A secondary carrier of the serving cell: already in use, so never a
+        -- voluntary target. Still a candidate, because an escape may want it.
+        c.aggregated = not c.self and is_own_carrier(c, serving) or nil
         -- Below min_rsrp a lock lands on a cell the modem cannot hold. The
         -- -104 dBm neighbour of 2026-09-14 gave fifteen polls of no service.
         c.weak = c.rsrp ~= nil and c.rsrp < cfg.min_rsrp
@@ -1180,6 +1252,7 @@ local function tick(cfg, enforce)
 
         if ok then
             escape.pending = now
+            switch_pending = nil
             state.locked = target
             state.lock_from = { rat = serving.rat, pci = serving.pci, earfcn = serving.earfcn, cid = serving.cid }
             state.adopted = nil
@@ -1241,6 +1314,24 @@ local function tick(cfg, enforce)
         end
     end
 
+    -- Judge the last voluntary lock once it has had time to settle. Landing
+    -- on the target, or on a cell that aggregates it, is the lock delivering.
+    -- Anything else is the modem preferring another cell of the list: note
+    -- the miss and stop switching for a while, but keep the lock -- the modem
+    -- is on a cell it allows, and letting go would cost another restart.
+    if switch_pending then
+        if same_cell(serving, switch_pending) or is_own_carrier(switch_pending, serving) then
+            switch_pending = nil
+        elseif since_switch >= cfg.verify_after then
+            switch_missed[escape_key(switch_pending)] = now
+            switch_paused_until = now + cfg.escape_reset
+            log('warn', string.format(
+                'locked to %s but the modem camped on %s; not asking for it again, switching paused for %dm',
+                label(switch_pending), label(serving), math.floor(cfg.escape_reset / 60)))
+            switch_pending = nil
+        end
+    end
+
     -- Not blocked: only move for a clear win, not more often than dwell, and
     -- only to a cell this router has camped on before -- that is the only
     -- evidence that a neighbour is on our network at all (neighbour reports
@@ -1260,7 +1351,7 @@ local function tick(cfg, enforce)
     -- A list lock, as for escapes: a single-cell lock forbids every handover,
     -- and on 2026-10-09 a router on the move rode one down to no service or
     -- 3G within a minute or two, again and again.
-    local target, group = pick_target(candidates)
+    local target, group = pick_target(candidates, missed_targets(now), true)
 
     if not target or not serving.score then
         state.last_reason = 'holding ' .. label(serving) .. ' (no known alternative)'
@@ -1279,6 +1370,7 @@ local function tick(cfg, enforce)
         state.locked = target
         state.adopted = nil
         state.last_switch = now
+        switch_pending = { rat = target.rat, pci = target.pci, earfcn = target.earfcn, bw_mhz = target.bw_mhz }
         weak_polls = 0
         state.last_reason = string.format('switched to %s (%+.1f better than %s)',
             label(target), gain, label(serving))
@@ -1550,6 +1642,37 @@ local function selftest()
     check('target: none when only unknown remain', t, nil)
     t = pick_target({ cands[1], cands[3] })
     check('target: none from unknown cells alone', t, nil)
+
+    -- Secondary carriers of the serving cell are not somewhere else to go.
+    check('carrier PCC: pci', carriers[1] and carriers[1].pci, 211)
+    check('carrier SCC: pci', carriers[2] and carriers[2].pci, 211)
+    check('nsa carrier NR: pci', nrc[3] and nrc[3].pci, 302)
+    local camped = { rat = 'LTE', pci = 211, earfcn = 275, carriers = carriers }
+    check('own carrier: unknown before any CA is seen', is_own_carrier(neighbours[3], camped), false)
+    learn_carriers(camped)
+    check('own carrier: an SCC of the serving cell', is_own_carrier(neighbours[3], camped), true)
+    check('own carrier: same channel, other pci', is_own_carrier(neighbours[4], camped), false)
+    check('own carrier: other cell on the primary channel', is_own_carrier(neighbours[2], camped), false)
+    check('own carrier: remembered once the modem idles',
+        is_own_carrier(neighbours[3], { rat = 'LTE', pci = 211, earfcn = 275, carriers = {} }), true)
+    check('own carrier: not from another primary',
+        is_own_carrier(neighbours[3], { rat = 'LTE', pci = 211, earfcn = 3200 }), false)
+    local scc = { rat = 'LTE', pci = 211, earfcn = 1350, bw_known = true, aggregated = true }
+    local far = { rat = 'LTE', pci = 216, earfcn = 1350, bw_known = true }
+    t, g = pick_target({ scc, far }, nil, true)
+    check('voluntary target: skips an own carrier', t and t.pci, 216)
+    check('voluntary target: own carrier stays in the group', g[1] and g[1].pci, 211)
+    t = pick_target({ scc }, nil, true)
+    check('voluntary target: none when only own carriers', t, nil)
+    t = pick_target({ scc, far })
+    check('escape target: an own carrier is fair game', t and t.pci, 211)
+    switch_missed['LTE/216/1350'] = 100
+    t = pick_target({ scc, far }, missed_targets(200), true)
+    check('voluntary target: a missed one is not retried', t, nil)
+    t = pick_target({ scc, far }, missed_targets(100 + SWITCH_RETRY_AFTER), true)
+    check('voluntary target: retried after the wait', t and t.pci, 216)
+    switch_missed = {}
+    ca_peers = {}
 
     -- Lock replies. Only an explicit 0 reads as unlocked; anything else,
     -- including no answer at all, gets the unlock written.
